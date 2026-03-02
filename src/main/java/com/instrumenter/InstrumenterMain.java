@@ -2,6 +2,7 @@ package com.instrumenter;
 
 import com.instrumenter.core.BytecodeInstrumenter;
 import com.instrumenter.transformers.MethodTracerVisitor;
+import com.instrumenter.transformers.FieldDefTracerVisitor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -30,7 +31,7 @@ public class InstrumenterMain {
         String outputPath = args[1];
         
         try {
-            instrumentClassFile(inputPath, outputPath);
+            instrumentClassFileWithFieldTracing(inputPath, outputPath);
             logger.info("Instrumentation completed successfully");
         } catch (IOException ex) {
             logger.error("Error during instrumentation", ex);
@@ -63,6 +64,33 @@ public class InstrumenterMain {
         
         instrumenter.writeToFile(outputFile, instrumentedBytecode);
         logger.info("Instrumented class file written to: {}", outputPath);
+    } 
+
+    private static void instrumentClassFileWithFieldTracing(String inputPath, String outputPath) throws IOException {
+        Path classFile = Paths.get(inputPath);
+        Path outputFile = Paths.get(outputPath);
+        
+        if (!Files.exists(classFile)) {
+            throw new IOException("Input class file not found: " + inputPath);
+        }
+        
+        logger.info("Instrumenting class file with field tracing: {}", inputPath);
+        
+        BytecodeInstrumenter instrumenter = 
+            new BytecodeInstrumenter(org.objectweb.asm.Opcodes.ASM9);
+        
+        byte[] bytecode = Files.readAllBytes(classFile);
+        byte[] instrumentedBytecode = instrumenter.instrument(bytecode,
+            (classWriter) -> new FieldDefTracerVisitor(classWriter));
+        
+        // Create output directory if it doesn't exist
+        Path outputDir = outputFile.getParent();
+        if (outputDir != null && !Files.exists(outputDir)) {
+            Files.createDirectories(outputDir);
+        }
+        
+        instrumenter.writeToFile(outputFile, instrumentedBytecode);
+        logger.info("Instrumented class file with field tracing written to: {}", outputPath);
     }
     
     private static void printUsage() {
