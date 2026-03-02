@@ -1,0 +1,87 @@
+plugins {
+    id 'java'
+    id 'application'
+    id 'maven-publish'
+}
+
+group = 'com.instrumenter'
+version = '1.0.0'
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_21
+    targetCompatibility = JavaVersion.VERSION_21
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // ASM library for bytecode manipulation
+    implementation 'org.ow2.asm:asm:9.7'
+    implementation 'org.ow2.asm:asm-commons:9.7'
+    implementation 'org.ow2.asm:asm-util:9.7'
+    
+    // Logging
+    implementation 'org.slf4j:slf4j-api:2.0.5'
+    implementation 'ch.qos.logback:logback-classic:1.4.6'
+    
+    // Testing
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.junit.jupiter:junit-jupiter-api:5.9.2'
+    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.9.2'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher:1.9.2'
+}
+
+application {
+    mainClass = 'com.instrumenter.InstrumenterMain'
+}
+
+// Task to create the main JAR (includes dependencies)
+task instrumenterJar(type: Jar) {
+    dependsOn classes
+    archiveFileName = 'java-instrumenter.jar'
+    duplicatesStrategy = 'EXCLUDE'
+    
+    from sourceSets.main.output
+    from {
+        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+    
+    manifest {
+        attributes(
+            'Main-Class': 'com.instrumenter.InstrumenterMain',
+            'Implementation-Title': 'Java Instrumenter',
+            'Implementation-Version': version
+        )
+    }
+}
+
+// Task to create the Java agent JAR
+task javaAgentJar(type: Jar) {
+    dependsOn classes
+    archiveFileName = 'java-instrumenter-agent.jar'
+    duplicatesStrategy = 'EXCLUDE'
+    
+    from sourceSets.main.output
+    from {
+        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+    
+    manifest {
+        attributes(
+            'Premain-Class': 'com.instrumenter.agent.InstrumenterAgent',
+            'Boot-Class-Path': '',
+            'Can-Redefine-Classes': 'true',
+            'Can-Retransform-Classes': 'true',
+            'Implementation-Title': 'Java Instrumenter',
+            'Implementation-Version': version
+        )
+    }
+}
+
+test {
+    useJUnitPlatform()
+}
+
+build.dependsOn javaAgentJar, instrumenterJar
