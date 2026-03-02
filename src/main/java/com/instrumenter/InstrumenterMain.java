@@ -1,6 +1,7 @@
 package com.instrumenter;
 
 import com.instrumenter.core.BytecodeInstrumenter;
+import com.instrumenter.core.JarInstrumenter;
 import com.instrumenter.transformers.MethodTracerVisitor;
 import com.instrumenter.transformers.FieldDefTracerVisitor;
 import org.slf4j.Logger;
@@ -31,14 +32,41 @@ public class InstrumenterMain {
         String outputPath = args[1];
         
         try {
-            instrumentClassFile(inputPath, outputPath);
+            if (inputPath.endsWith(".jar")) {
+                instrumentJarFile(inputPath, outputPath);
+            } else if (inputPath.endsWith(".class")) {
+                instrumentClassFile(inputPath, outputPath);
+            } else {
+                logger.error("Unsupported file type. Expected .class or .jar file");
+                System.exit(1);
+            }
             logger.info("Instrumentation completed successfully");
         } catch (IOException ex) {
             logger.error("Error during instrumentation", ex);
             System.exit(1);
         }
     }
-    
+   
+    private static void instrumentJarFile(String inputJarPath, String outputJarPath) throws IOException {
+        Path inputJar = Paths.get(inputJarPath);
+        Path outputJar = Paths.get(outputJarPath);
+        
+        if (!Files.exists(inputJar)) {
+            throw new IOException("Input JAR file not found: " + inputJarPath);
+        }
+        
+        logger.info("Instrumenting JAR file: {}", inputJarPath);
+        
+        JarInstrumenter instrumenter = 
+            new JarInstrumenter(org.objectweb.asm.Opcodes.ASM9);
+        
+        instrumenter.instrumentJar(inputJar, outputJar, 
+            (classWriter) -> new MethodTracerVisitor(classWriter));
+        
+        logger.info("Instrumented JAR file written to: {}", outputJarPath);
+    }    
+
+
     private static void instrumentClassFile(String inputPath, String outputPath) throws IOException {
         Path classFile = Paths.get(inputPath);
         Path outputFile = Paths.get(outputPath);
@@ -94,10 +122,13 @@ public class InstrumenterMain {
     }
     
     private static void printUsage() {
-        System.out.println("Usage: java -jar java-instrumenter.jar <input-class> <output-class>");
+        System.out.println("Usage: java -jar java-instrumenter.jar <input-file> <output-file>");
+        System.out.println("");
+        System.out.println("Supported input types: .class files or .jar files");
         System.out.println("");
         System.out.println("Examples:");
         System.out.println("  java -jar java-instrumenter.jar MyClass.class MyClass.instrumented.class");
         System.out.println("  java -jar java-instrumenter.jar build/MyClass.class dist/MyClass.class");
+        System.out.println("  java -jar java-instrumenter.jar app.jar app-instrumented.jar");
     }
 }
