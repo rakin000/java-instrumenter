@@ -31,7 +31,7 @@ public class InstrumenterMain {
         String outputPath = args[1];
         
         try {
-            instrumentClassFileWithFieldTracing(inputPath, outputPath);
+            instrumentClassFile(inputPath, outputPath);
             logger.info("Instrumentation completed successfully");
         } catch (IOException ex) {
             logger.error("Error during instrumentation", ex);

@@ -3,9 +3,10 @@ package com.instrumenter.transformers;
 import org.objectweb.asm.ClassVisitor;
 import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
-import com.instrumenter.core.AbstractInstrumentationVisitor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import com.instrumenter.core.AbstractInstrumentationVisitor;
 
 /**
  * MethodTracer instruments methods to log entry and exit points.
@@ -80,6 +81,53 @@ public class MethodTracerVisitor extends AbstractInstrumentationVisitor {
             super.visitInsn(opcode);
         }
         
+        @Override 
+        public void visitFieldInsn(int opcode, String owner, String name, String descriptor) {
+            // Optionally, you could add logging for field accesses here
+            if (opcode == Opcodes.GETFIELD ) {
+                visitFieldInsn(Opcodes.GETSTATIC, "java/lang/System", "out", "Ljava/io/PrintStream;");
+                visitLdcInsn("[FIELD READ] " + className + "." + methodName + descriptor + " - Accessing field: " + owner + "." + name);
+                visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/io/PrintStream", "println", 
+                              "(Ljava/lang/String;)V", false);
+            } else if (opcode == Opcodes.PUTFIELD) {
+                visitFieldInsn(Opcodes.GETSTATIC, "java/lang/System", "out", "Ljava/io/PrintStream;");
+                visitLdcInsn("[FIELD WRITE] " + className + "." + methodName + descriptor + " - Modifying field: " + owner + "." + name);
+                visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/io/PrintStream", "println", 
+                              "(Ljava/lang/String;)V", false);
+            }
+            //  else if (opcode == Opcodes.GETSTATIC) {
+            //     visitFieldInsn(Opcodes.GETSTATIC, "java/lang/System", "out", "Ljava/io/PrintStream;");
+            //     visitLdcInsn("[STATIC FIELD READ] " + className + "." + methodName + descriptor + " - Accessing static field: " + owner + "." + name);
+            //     visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/io/PrintStream", "println", 
+            //                   "(Ljava/lang/String;)V", false);
+            // } else if (opcode == Opcodes.PUTSTATIC) {
+            //     visitFieldInsn(Opcodes.GETSTATIC, "java/lang/System", "out", "Ljava/io/PrintStream;");
+            //     visitLdcInsn("[STATIC FIELD WRITE] " + className + "." + methodName + descriptor + " - Modifying static field: " + owner + "." + name);
+            //     visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/io/PrintStream", "println", 
+            //                   "(Ljava/lang/String;)V", false);
+            // } 
+
+            super.visitFieldInsn(opcode, owner, name, descriptor);
+        }
+
+
+        public void visitVarInsn(int opcode, int var) {
+            // Optionally, you could add logging for variable loads/stores here
+            if (isLoad(opcode)) {
+                visitFieldInsn(Opcodes.GETSTATIC, "java/lang/System", "out", "Ljava/io/PrintStream;");
+                visitLdcInsn("[VAR LOAD] " + className + "." + methodName + descriptor + " - Loading variable index: " + var);
+                visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/io/PrintStream", "println", 
+                              "(Ljava/lang/String;)V", false);
+            } else if (isStore(opcode)) {
+                visitFieldInsn(Opcodes.GETSTATIC, "java/lang/System", "out", "Ljava/io/PrintStream;");
+                visitLdcInsn("[VAR STORE] " + className + "." + methodName + descriptor + " - Storing variable index: " + var);
+                visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/io/PrintStream", "println", 
+                              "(Ljava/lang/String;)V", false);
+            } 
+
+            super.visitVarInsn(opcode, var);
+        }
+
         private boolean isReturnOpcode(int opcode) {
             return opcode == Opcodes.RETURN ||
                    opcode == Opcodes.IRETURN ||
@@ -87,6 +135,22 @@ public class MethodTracerVisitor extends AbstractInstrumentationVisitor {
                    opcode == Opcodes.FRETURN ||
                    opcode == Opcodes.DRETURN ||
                    opcode == Opcodes.ARETURN;
+        }
+
+        private boolean isStore(int opcode) {
+            return opcode == Opcodes.ISTORE ||
+                opcode == Opcodes.LSTORE ||
+                opcode == Opcodes.FSTORE ||
+                opcode == Opcodes.DSTORE ||
+                opcode == Opcodes.ASTORE;
+        }
+
+        private boolean isLoad(int opcode) {
+            return opcode == Opcodes.ILOAD ||
+                opcode == Opcodes.LLOAD ||
+                opcode == Opcodes.FLOAD ||
+                opcode == Opcodes.DLOAD ||
+                opcode == Opcodes.ALOAD;
         }
     }
 }
