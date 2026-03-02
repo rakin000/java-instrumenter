@@ -1,6 +1,7 @@
 package com.instrumenter.transformers;
 
 import com.instrumenter.core.AbstractInstrumentationVisitor;
+import com.instrumenter.core.InstrumentationFilter;
 import org.objectweb.asm.ClassVisitor;
 import org.objectweb.asm.FieldVisitor;
 import org.objectweb.asm.MethodVisitor;
@@ -23,6 +24,10 @@ public class FieldDefTracerVisitor extends AbstractInstrumentationVisitor {
         super(classVisitor);
     }
     
+    public FieldDefTracerVisitor(ClassVisitor classVisitor, InstrumentationFilter filter) {
+        super(classVisitor, filter);
+    }
+    
     @Override
     public FieldVisitor visitField(int access, String name, String descriptor, 
                                    String signature, Object value) {
@@ -30,6 +35,12 @@ public class FieldDefTracerVisitor extends AbstractInstrumentationVisitor {
         
         // Skip synthetic fields
         if ((access & Opcodes.ACC_SYNTHETIC) != 0) {
+            return fieldVisitor;
+        }
+        
+        // Check filter
+        if (!filter.shouldInstrumentField(className, name, descriptor)) {
+            logger.debug("Skipping field (filtered): {}.{}{}", className, name, descriptor);
             return fieldVisitor;
         }
 
@@ -75,7 +86,7 @@ public class FieldDefTracerVisitor extends AbstractInstrumentationVisitor {
 //               visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/io/PrintStream", "println", "(Ljava/lang/String;)V", false);
          
                 // instrument to log field value at runtime (this is just a placeholder, replace with actual instrumentation)
-                
+
             }
             super.visitEnd();
         }

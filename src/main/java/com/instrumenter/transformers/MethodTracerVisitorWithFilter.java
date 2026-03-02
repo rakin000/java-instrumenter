@@ -13,6 +13,8 @@ public class MethodTracerVisitorWithFilter extends AbstractInstrumentationVisito
     private static final Logger logger = LoggerFactory.getLogger(MethodTracerVisitorWithFilter.class);
     
     public MethodTracerVisitorWithFilter(ClassVisitor classVisitor) {
+        // filter with classname 
+        
         super(classVisitor);
     }
     

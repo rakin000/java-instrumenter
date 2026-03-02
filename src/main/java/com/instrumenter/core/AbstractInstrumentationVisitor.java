@@ -15,9 +15,16 @@ public abstract class AbstractInstrumentationVisitor extends ClassVisitor {
     protected static final Logger logger = LoggerFactory.getLogger(AbstractInstrumentationVisitor.class);
     
     protected String className;
+    protected InstrumentationFilter filter;
     
     public AbstractInstrumentationVisitor(ClassVisitor classVisitor) {
         super(Opcodes.ASM9, classVisitor);
+        this.filter = new PatternBasedInstrumentationFilter(); // Default: instrument everything
+    }
+    
+    public AbstractInstrumentationVisitor(ClassVisitor classVisitor, InstrumentationFilter filter) {
+        super(Opcodes.ASM9, classVisitor);
+        this.filter = filter != null ? filter : new PatternBasedInstrumentationFilter();
     }
     
     @Override

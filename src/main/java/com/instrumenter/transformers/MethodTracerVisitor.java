@@ -7,6 +7,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.instrumenter.core.AbstractInstrumentationVisitor;
+import com.instrumenter.core.InstrumentationFilter;
 
 /**
  * MethodTracer instruments methods to log entry and exit points.
@@ -20,11 +21,21 @@ public class MethodTracerVisitor extends AbstractInstrumentationVisitor {
         super(classVisitor);
     }
     
+    public MethodTracerVisitor(ClassVisitor classVisitor, InstrumentationFilter filter) {
+        super(classVisitor, filter);
+    }
+    
     @Override
     protected MethodVisitor createMethodVisitor(MethodVisitor methodVisitor, 
                                                int access, String name, String descriptor) {
         // Skip synthetic methods and the static initializer
         if (isSyntheticOrSpecial(access, name)) {
+            return methodVisitor;
+        }
+        
+        // Check filter
+        if (!filter.shouldInstrumentMethod(className, name, descriptor)) {
+            logger.debug("Skipping method (filtered): {}.{}{}", className, name, descriptor);
             return methodVisitor;
         }
         
@@ -83,7 +94,8 @@ public class MethodTracerVisitor extends AbstractInstrumentationVisitor {
         
         @Override 
         public void visitFieldInsn(int opcode, String owner, String name, String descriptor) {
-            // Optionally, you could add logging for field accesses here
+          
+
             if (opcode == Opcodes.GETFIELD ) {
                 visitFieldInsn(Opcodes.GETSTATIC, "java/lang/System", "out", "Ljava/io/PrintStream;");
                 visitLdcInsn("[FIELD READ] " + className + "." + methodName + descriptor + " - Accessing field: " + owner + "." + name);
