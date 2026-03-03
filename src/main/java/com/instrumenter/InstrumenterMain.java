@@ -5,6 +5,7 @@ import com.instrumenter.core.JarInstrumenter;
 import com.instrumenter.core.PatternBasedInstrumentationFilter;
 import com.instrumenter.transformers.MethodTracerVisitor;
 import com.instrumenter.transformers.FieldDefTracerVisitor;
+import com.instrumenter.transformers.CombinedMethodAndFieldTracerVisitor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -33,13 +34,13 @@ public class InstrumenterMain {
         String outputPath = args[1];
         
         // Parse filter options from remaining arguments
-        PatternBasedInstrumentationFilter filter = parseFilterArguments(args);
+        FilterWrapper filterWrapper = parseFilterArguments(args);
         
         try {
             if (inputPath.endsWith(".jar")) {
-                instrumentJarFile(inputPath, outputPath, filter);
+                instrumentJarFile(inputPath, outputPath, filterWrapper);
             } else if (inputPath.endsWith(".class")) {
-                instrumentClassFile(inputPath, outputPath, filter);
+                instrumentClassFile(inputPath, outputPath, filterWrapper);
             } else {
                 logger.error("Unsupported file type. Expected .class or .jar file");
                 System.exit(1);
@@ -60,9 +61,12 @@ public class InstrumenterMain {
      *   --exclude-method <pattern>
      *   --include-field <pattern>
      *   --exclude-field <pattern>
+     * 
+     * Returns a filter with a flag indicating if field filters are used.
      */
-    private static PatternBasedInstrumentationFilter parseFilterArguments(String[] args) {
+    private static FilterWrapper parseFilterArguments(String[] args) {
         PatternBasedInstrumentationFilter filter = new PatternBasedInstrumentationFilter();
+        boolean hasFieldFilters = false;
         
         for (int i = 2; i < args.length; i++) {
             String arg = args[i];
@@ -98,11 +102,13 @@ public class InstrumenterMain {
                 case "--include-field":
                     filter.includeField(pattern);
                     logger.debug("Added include field pattern: {}", pattern);
+                    hasFieldFilters = true;
                     i++;
                     break;
                 case "--exclude-field":
                     filter.excludeField(pattern);
                     logger.debug("Added exclude field pattern: {}", pattern);
+                    hasFieldFilters = true;
                     i++;
                     break;
                 default:
@@ -110,11 +116,24 @@ public class InstrumenterMain {
             }
         }
         
-        return filter;
+        return new FilterWrapper(filter, hasFieldFilters);
+    }
+    
+    /**
+     * Wrapper class to return both filter and a flag indicating field filters usage.
+     */
+    private static class FilterWrapper {
+        PatternBasedInstrumentationFilter filter;
+        boolean hasFieldFilters;
+        
+        FilterWrapper(PatternBasedInstrumentationFilter filter, boolean hasFieldFilters) {
+            this.filter = filter;
+            this.hasFieldFilters = hasFieldFilters;
+        }
     }
    
     private static void instrumentJarFile(String inputJarPath, String outputJarPath, 
-                                          PatternBasedInstrumentationFilter filter) throws IOException {
+                                          FilterWrapper filterWrapper) throws IOException {
         Path inputJar = Paths.get(inputJarPath);
         Path outputJar = Paths.get(outputJarPath);
         
@@ -127,15 +146,23 @@ public class InstrumenterMain {
         JarInstrumenter instrumenter = 
             new JarInstrumenter(org.objectweb.asm.Opcodes.ASM9);
         
-        instrumenter.instrumentJar(inputJar, outputJar, 
-            (classWriter) -> new MethodTracerVisitor(classWriter, filter));
+        // Use combined visitor if field filters are present, otherwise use method-only visitor
+        if (filterWrapper.hasFieldFilters) {
+            logger.info("Using combined method and field tracer");
+            instrumenter.instrumentJar(inputJar, outputJar, 
+                (classWriter) -> new CombinedMethodAndFieldTracerVisitor(classWriter, filterWrapper.filter));
+        } else {
+            logger.info("Using method-only tracer");
+            instrumenter.instrumentJar(inputJar, outputJar, 
+                (classWriter) -> new MethodTracerVisitor(classWriter, filterWrapper.filter));
+        }
         
         logger.info("Instrumented JAR file written to: {}", outputJarPath);
     }    
 
 
     private static void instrumentClassFile(String inputPath, String outputPath,
-                                             PatternBasedInstrumentationFilter filter) throws IOException {
+                                             FilterWrapper filterWrapper) throws IOException {
         Path classFile = Paths.get(inputPath);
         Path outputFile = Paths.get(outputPath);
         
@@ -149,8 +176,18 @@ public class InstrumenterMain {
             new BytecodeInstrumenter(org.objectweb.asm.Opcodes.ASM9);
         
         byte[] bytecode = Files.readAllBytes(classFile);
-        byte[] instrumentedBytecode = instrumenter.instrument(bytecode,
-            (classWriter) -> new MethodTracerVisitor(classWriter, filter));
+        
+        // Use combined visitor if field filters are present, otherwise use method-only visitor
+        byte[] instrumentedBytecode;
+        if (filterWrapper.hasFieldFilters) {
+            logger.info("Using combined method and field tracer");
+            instrumentedBytecode = instrumenter.instrument(bytecode,
+                (classWriter) -> new CombinedMethodAndFieldTracerVisitor(classWriter, filterWrapper.filter));
+        } else {
+            logger.info("Using method-only tracer");
+            instrumentedBytecode = instrumenter.instrument(bytecode,
+                (classWriter) -> new MethodTracerVisitor(classWriter, filterWrapper.filter));
+        }
         
         // Create output directory if it doesn't exist
         Path outputDir = outputFile.getParent();
@@ -163,7 +200,7 @@ public class InstrumenterMain {
     } 
 
     private static void instrumentClassFileWithFieldTracing(String inputPath, String outputPath,
-                                                            PatternBasedInstrumentationFilter filter) throws IOException {
+                                                            FilterWrapper filterWrapper) throws IOException {
         Path classFile = Paths.get(inputPath);
         Path outputFile = Paths.get(outputPath);
         
@@ -178,7 +215,7 @@ public class InstrumenterMain {
         
         byte[] bytecode = Files.readAllBytes(classFile);
         byte[] instrumentedBytecode = instrumenter.instrument(bytecode,
-            (classWriter) -> new FieldDefTracerVisitor(classWriter, filter));
+            (classWriter) -> new FieldDefTracerVisitor(classWriter, filterWrapper.filter));
         
         // Create output directory if it doesn't exist
         Path outputDir = outputFile.getParent();

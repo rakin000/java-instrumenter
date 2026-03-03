@@ -52,7 +52,7 @@ public class MethodTracerVisitor extends AbstractInstrumentationVisitor {
     /**
      * Inner class that instruments individual methods.
      */
-    private static class MethodTracingVisitor extends MethodVisitor {
+    public static class MethodTracingVisitor extends MethodVisitor {
         
         private final String className;
         private final String methodName;

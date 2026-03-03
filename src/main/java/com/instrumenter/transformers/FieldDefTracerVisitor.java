@@ -58,7 +58,7 @@ public class FieldDefTracerVisitor extends AbstractInstrumentationVisitor {
     /**
      * Inner class that instruments individual fields.
      */
-    private static class FieldDefTracingVisitor extends FieldVisitor {
+    public static class FieldDefTracingVisitor extends FieldVisitor {
         
         private final String className;
         private final String fieldName;
