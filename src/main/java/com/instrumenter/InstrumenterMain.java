@@ -65,7 +65,11 @@ public class InstrumenterMain {
      * Returns a filter with a flag indicating if field filters are used.
      */
     private static FilterWrapper parseFilterArguments(String[] args) {
-        PatternBasedInstrumentationFilter filter = new PatternBasedInstrumentationFilter();
+        if (args.length <= 2) {
+            // No filter options provided, return default filter that includes everything
+            return new FilterWrapper(new PatternBasedInstrumentationFilter(".*", ".*", ".*"), false);
+        }
+        PatternBasedInstrumentationFilter filter = new PatternBasedInstrumentationFilter("", "", ""); // Start with empty patterns, will add based on args
         boolean hasFieldFilters = false;
         
         for (int i = 2; i < args.length; i++) {

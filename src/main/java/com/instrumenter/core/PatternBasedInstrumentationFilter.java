@@ -18,6 +18,40 @@ public class PatternBasedInstrumentationFilter implements InstrumentationFilter 
     private Set<String> excludedMethods = new HashSet<>();
     private Set<String> excludedFields = new HashSet<>();
     
+    
+    public PatternBasedInstrumentationFilter(String classPattern, String methodPattern, String fieldPattern) {
+        if (classPattern != null && !classPattern.isEmpty()) {
+            classPatterns.add(Pattern.compile(classPattern));
+        }
+        if (methodPattern != null && !methodPattern.isEmpty()) {
+            methodPatterns.add(Pattern.compile(methodPattern));
+        }
+        if (fieldPattern != null && !fieldPattern.isEmpty()) {
+            fieldPatterns.add(Pattern.compile(fieldPattern));
+        }
+    }
+
+    public PatternBasedInstrumentationFilter() {
+
+    }
+
+    public PatternBasedInstrumentationFilter allClass() {
+        // Default: instrument everything (except explicitly excluded)
+        classPatterns.add(Pattern.compile(".*"));
+        return this;
+    }
+
+    public PatternBasedInstrumentationFilter allMethod() {
+        // Default: instrument everything (except explicitly excluded and special methods)
+        methodPatterns.add(Pattern.compile(".*"));
+        return this;
+    }
+
+    public PatternBasedInstrumentationFilter allField() {
+        // Default: instrument everything (except explicitly excluded)
+        fieldPatterns.add(Pattern.compile(".*"));
+        return this;
+    }
     /**
      * Add a pattern to include classes for instrumentation.
      * Pattern should be a regex (e.g., "com/example/.*" or ".*Service")
@@ -97,9 +131,9 @@ public class PatternBasedInstrumentationFilter implements InstrumentationFilter 
         }
         
         // If no patterns set, instrument all classes (except excluded ones)
-        if (classPatterns.isEmpty()) {
-            return true;
-        }
+        // if (classPatterns.isEmpty()) {
+        //     return true;
+        // }
         
         // Check if matches any include pattern
         return classPatterns.stream().anyMatch(p -> p.matcher(className).matches());
@@ -116,9 +150,9 @@ public class PatternBasedInstrumentationFilter implements InstrumentationFilter 
         }
         
         // If no patterns set, instrument all methods (except excluded ones and special methods)
-        if (methodPatterns.isEmpty()) {
-            return !isSpecialMethod(methodName);
-        }
+        // if (methodPatterns.isEmpty()) {
+        //     return !isSpecialMethod(methodName);
+        // }
         
         // Check if matches any include pattern
         return methodPatterns.stream().anyMatch(p -> 
@@ -138,9 +172,9 @@ public class PatternBasedInstrumentationFilter implements InstrumentationFilter 
         }
         
         // If no patterns set, instrument all fields (except excluded ones)
-        if (fieldPatterns.isEmpty()) {
-            return true;
-        }
+        // if (fieldPatterns.isEmpty()) {
+        //     return true;
+        // }
         
         // Check if matches any include pattern
         return fieldPatterns.stream().anyMatch(p -> 
