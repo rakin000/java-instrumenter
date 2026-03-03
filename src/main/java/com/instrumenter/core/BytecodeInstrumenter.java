@@ -43,7 +43,9 @@ public class BytecodeInstrumenter {
      */
     public byte[] instrument(byte[] bytecode, Function<ClassWriter, ClassVisitor> visitorFactory, boolean computeFrames) {
         ClassReader classReader = new ClassReader(bytecode);
-        int flags = computeFrames ? ClassWriter.COMPUTE_FRAMES : 0;
+        // Use COMPUTE_MAXS for better compatibility with external dependencies
+        // COMPUTE_FRAMES requires all types on classpath, which isn't always available
+        int flags = computeFrames ? ClassWriter.COMPUTE_MAXS : 0;
         ClassWriter classWriter = new ClassWriter(flags);
         ClassVisitor visitor = visitorFactory.apply(classWriter);
         

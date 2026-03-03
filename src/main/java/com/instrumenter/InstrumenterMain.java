@@ -147,15 +147,9 @@ public class InstrumenterMain {
             new JarInstrumenter(org.objectweb.asm.Opcodes.ASM9);
         
         // Use combined visitor if field filters are present, otherwise use method-only visitor
-        if (filterWrapper.hasFieldFilters) {
-            logger.info("Using combined method and field tracer");
-            instrumenter.instrumentJar(inputJar, outputJar, 
-                (classWriter) -> new CombinedMethodAndFieldTracerVisitor(classWriter, filterWrapper.filter));
-        } else {
-            logger.info("Using method-only tracer");
-            instrumenter.instrumentJar(inputJar, outputJar, 
-                (classWriter) -> new MethodTracerVisitor(classWriter, filterWrapper.filter));
-        }
+        logger.info("Using combined method and field tracer");
+        instrumenter.instrumentJar(inputJar, outputJar, 
+            (classWriter) -> new MethodTracerVisitor(classWriter, filterWrapper.filter));
         
         logger.info("Instrumented JAR file written to: {}", outputJarPath);
     }    
@@ -179,15 +173,8 @@ public class InstrumenterMain {
         
         // Use combined visitor if field filters are present, otherwise use method-only visitor
         byte[] instrumentedBytecode;
-        if (filterWrapper.hasFieldFilters) {
-            logger.info("Using combined method and field tracer");
-            instrumentedBytecode = instrumenter.instrument(bytecode,
-                (classWriter) -> new CombinedMethodAndFieldTracerVisitor(classWriter, filterWrapper.filter));
-        } else {
-            logger.info("Using method-only tracer");
-            instrumentedBytecode = instrumenter.instrument(bytecode,
-                (classWriter) -> new MethodTracerVisitor(classWriter, filterWrapper.filter));
-        }
+        instrumentedBytecode = instrumenter.instrument(bytecode,
+            (classWriter) -> new MethodTracerVisitor(classWriter, filterWrapper.filter));
         
         // Create output directory if it doesn't exist
         Path outputDir = outputFile.getParent();

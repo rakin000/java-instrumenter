@@ -86,7 +86,9 @@ public class JarInstrumenter {
     private byte[] instrumentClass(byte[] classBytes, 
                                     Function<ClassWriter, ClassVisitor> visitorFactory) {
         ClassReader reader = new ClassReader(classBytes);
-        ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_FRAMES);
+        // Use COMPUTE_MAXS instead of COMPUTE_FRAMES to avoid ClassNotFoundException
+        // when instrumenting JARs with external dependencies not on classpath
+        ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
         ClassVisitor visitor = visitorFactory.apply(writer);
         
         reader.accept(visitor, ClassReader.EXPAND_FRAMES);

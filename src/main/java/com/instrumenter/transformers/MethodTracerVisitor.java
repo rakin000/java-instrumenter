@@ -40,7 +40,7 @@ public class MethodTracerVisitor extends AbstractInstrumentationVisitor {
         }
         
         logger.debug("Instrumenting method: {}.{}{}", className, name, descriptor);
-        return new MethodTracingVisitor(methodVisitor, className, name, descriptor, access);
+        return new MethodTracingVisitor(methodVisitor, className, name, descriptor, access, filter);
     }
     
     private boolean isSyntheticOrSpecial(int access, String name) {
@@ -58,7 +58,8 @@ public class MethodTracerVisitor extends AbstractInstrumentationVisitor {
         private final String methodName;
         private final String descriptor;
         private final int access;
-        
+        private final InstrumentationFilter filter; 
+
         public MethodTracingVisitor(MethodVisitor methodVisitor, String className, 
                                    String methodName, String descriptor, int access) {
             super(Opcodes.ASM9, methodVisitor);
@@ -66,11 +67,27 @@ public class MethodTracerVisitor extends AbstractInstrumentationVisitor {
             this.methodName = methodName;
             this.descriptor = descriptor;
             this.access = access;
+            this.filter = null;
+        }
+
+        public MethodTracingVisitor(MethodVisitor methodVisitor, String className, 
+                                   String methodName, String descriptor, int access, InstrumentationFilter filter) {
+            super(Opcodes.ASM9, methodVisitor);
+            this.className = className;
+            this.methodName = methodName;
+            this.descriptor = descriptor;
+            this.access = access;
+            this.filter = filter;
         }
         
+
         @Override
         public void visitCode() {
-            // Add entry logging
+            // Add entry logging 
+            if (filter != null && !filter.shouldInstrumentMethod(className, methodName, descriptor)) {
+                super.visitCode();
+                return;
+            }
             visitFieldInsn(Opcodes.GETSTATIC, "java/lang/System", "out", "Ljava/io/PrintStream;");
             visitLdcInsn("[ENTRY] " + className + "." + methodName + descriptor);
             visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/io/PrintStream", "println", 
@@ -82,6 +99,10 @@ public class MethodTracerVisitor extends AbstractInstrumentationVisitor {
         @Override
         public void visitInsn(int opcode) {
             // Add exit logging for return instructions
+            if (filter != null && !filter.shouldInstrumentMethod(className, methodName, descriptor)) {
+                super.visitInsn(opcode);
+                return;
+            }
             if (isReturnOpcode(opcode)) {
                 visitFieldInsn(Opcodes.GETSTATIC, "java/lang/System", "out", "Ljava/io/PrintStream;");
                 visitLdcInsn("[EXIT] " + className + "." + methodName + descriptor);
@@ -94,7 +115,11 @@ public class MethodTracerVisitor extends AbstractInstrumentationVisitor {
         
         @Override 
         public void visitFieldInsn(int opcode, String owner, String name, String descriptor) {
-          
+            
+            if( filter != null && !filter.shouldInstrumentField(owner, name, descriptor)) {
+                super.visitFieldInsn(opcode, owner, name, descriptor);
+                return;
+            }
 
             if (opcode == Opcodes.GETFIELD ) {
                 visitFieldInsn(Opcodes.GETSTATIC, "java/lang/System", "out", "Ljava/io/PrintStream;");
@@ -123,22 +148,22 @@ public class MethodTracerVisitor extends AbstractInstrumentationVisitor {
         }
 
 
-        public void visitVarInsn(int opcode, int var) {
-            // Optionally, you could add logging for variable loads/stores here
-            if (isLoad(opcode)) {
-                visitFieldInsn(Opcodes.GETSTATIC, "java/lang/System", "out", "Ljava/io/PrintStream;");
-                visitLdcInsn("[VAR LOAD] " + className + "." + methodName + descriptor + " - Loading variable index: " + var);
-                visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/io/PrintStream", "println", 
-                              "(Ljava/lang/String;)V", false);
-            } else if (isStore(opcode)) {
-                visitFieldInsn(Opcodes.GETSTATIC, "java/lang/System", "out", "Ljava/io/PrintStream;");
-                visitLdcInsn("[VAR STORE] " + className + "." + methodName + descriptor + " - Storing variable index: " + var);
-                visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/io/PrintStream", "println", 
-                              "(Ljava/lang/String;)V", false);
-            } 
+        // public void visitVarInsn(int opcode, int var) {
+        //     // Optionally, you could add logging for variable loads/stores here
+        //     if (isLoad(opcode)) {
+        //         visitFieldInsn(Opcodes.GETSTATIC, "java/lang/System", "out", "Ljava/io/PrintStream;");
+        //         visitLdcInsn("[VAR LOAD] " + className + "." + methodName + descriptor + " - Loading variable index: " + var);
+        //         visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/io/PrintStream", "println", 
+        //                       "(Ljava/lang/String;)V", false);
+        //     } else if (isStore(opcode)) {
+        //         visitFieldInsn(Opcodes.GETSTATIC, "java/lang/System", "out", "Ljava/io/PrintStream;");
+        //         visitLdcInsn("[VAR STORE] " + className + "." + methodName + descriptor + " - Storing variable index: " + var);
+        //         visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/io/PrintStream", "println", 
+        //                       "(Ljava/lang/String;)V", false);
+        //     } 
 
-            super.visitVarInsn(opcode, var);
-        }
+        //     super.visitVarInsn(opcode, var);
+        // }
 
         private boolean isReturnOpcode(int opcode) {
             return opcode == Opcodes.RETURN ||
