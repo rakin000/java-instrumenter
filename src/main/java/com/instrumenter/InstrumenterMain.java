@@ -66,10 +66,9 @@ public class InstrumenterMain {
      */
     private static FilterWrapper parseFilterArguments(String[] args) {
         if (args.length <= 2) {
-            // No filter options provided, return default filter that includes everything
-            return new FilterWrapper(new PatternBasedInstrumentationFilter(".*", ".*", ".*"), false);
+            return new FilterWrapper(new PatternBasedInstrumentationFilter().allClass().allMethod().allField(), false);
         }
-        PatternBasedInstrumentationFilter filter = new PatternBasedInstrumentationFilter("", "", ""); // Start with empty patterns, will add based on args
+        PatternBasedInstrumentationFilter filter = new PatternBasedInstrumentationFilter(); // Start with empty patterns, will add based on args
         boolean hasFieldFilters = false;
         
         for (int i = 2; i < args.length; i++) {
