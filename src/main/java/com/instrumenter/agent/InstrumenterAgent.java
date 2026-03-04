@@ -30,7 +30,6 @@ public class InstrumenterAgent {
         logger.info("Agent arguments: {}", agentArgs); 
         
         if (agentArgs == null ) {
-            // Register the class file transformer
             instrumentation.addTransformer(new MethodTracingTransformer(), false);
             logger.info("Method tracing instrumentation enabled");  
         } 
@@ -48,8 +47,18 @@ public class InstrumenterAgent {
      */
     public static void agentmain(String agentArgs, Instrumentation instrumentation) {
         logger.info("Java Instrumenter Agent attached dynamically");
-  //      instrumentation.addTransformer(new MethodTracingTransformer());
-        instrumentation.addTransformer(new MethodTracingTransformer());
+        logger.info("Agent arguments: {}", agentArgs);
+
+        if (agentArgs == null ) {
+            instrumentation.addTransformer(new MethodTracingTransformer(), false);
+            logger.info("Method tracing instrumentation enabled");  
+        } 
+        else {
+            String[] args = agentArgs.split(" ") ;
+            InstrumentationFilter filter = parseFilterArguments(args); 
+            instrumentation.addTransformer(new MethodTracingTransformer(filter), false);
+            logger.info("Method tracing instrumentation enabled with filter: {}", agentArgs);
+        }
     }
     
 
@@ -149,20 +158,8 @@ public class InstrumenterAgent {
 
 
         public MethodTracingTransformer() {
-            // Default constructor
-            // instrument everything 
-            this.filter = new PatternBasedInstrumentationFilter()
-                                                        .allClass()
-                                                        .allMethod()
-                                                        .allField()
-                                                        .excludeClass("java/.*") 
-                                                        .excludeClass("javax/.*")
-                                                        .excludeClass("sun/.*")
-                                                        .excludeClass("com/sun/.*")
-                                                        .excludeClass("com/instrumenter/.*")
-                                                        .excludeClass("org/slf4j/.*")
-                                                        .excludeClass("org/ow2/asm/.*")
-                                                        .excludeClass("ch/qos/logback/.*");
+            // Default constructor with default filter
+            this.filter = new PatternBasedInstrumentationFilter() ; 
         }
         
 
