@@ -14,9 +14,9 @@ public class PatternBasedInstrumentationFilter implements InstrumentationFilter 
     private Set<Pattern> methodPatterns = new HashSet<>();
     private Set<Pattern> fieldPatterns = new HashSet<>();
     
-    private Set<String> excludedClasses = new HashSet<>();
-    private Set<String> excludedMethods = new HashSet<>();
-    private Set<String> excludedFields = new HashSet<>();
+    private Set<Pattern> excludedClassesPatterns = new HashSet<>();
+    private Set<Pattern> excludedMethodsPatterns = new HashSet<>();
+    private Set<Pattern> excludedFieldsPatterns = new HashSet<>();
     
     
     public PatternBasedInstrumentationFilter(String classPattern, String methodPattern, String fieldPattern) {
@@ -94,10 +94,11 @@ public class PatternBasedInstrumentationFilter implements InstrumentationFilter 
      * @param className fully qualified class name
      * @return this instance for method chaining
      */
-    public PatternBasedInstrumentationFilter excludeClass(String className) {
-        excludedClasses.add(className);
+    public PatternBasedInstrumentationFilter excludeClass(String pattern) {
+        excludedClassesPatterns.add(Pattern.compile(pattern));
         return this;
-    }
+    } 
+
     
     /**
      * Exclude a specific method from instrumentation.
@@ -106,8 +107,8 @@ public class PatternBasedInstrumentationFilter implements InstrumentationFilter 
      * @param methodSpec method specification
      * @return this instance for method chaining
      */
-    public PatternBasedInstrumentationFilter excludeMethod(String methodSpec) {
-        excludedMethods.add(methodSpec);
+    public PatternBasedInstrumentationFilter excludeMethod(String pattern) {
+        excludedMethodsPatterns.add(Pattern.compile(pattern));
         return this;
     }
     
@@ -118,15 +119,15 @@ public class PatternBasedInstrumentationFilter implements InstrumentationFilter 
      * @param fieldSpec field specification
      * @return this instance for method chaining
      */
-    public PatternBasedInstrumentationFilter excludeField(String fieldSpec) {
-        excludedFields.add(fieldSpec);
+    public PatternBasedInstrumentationFilter excludeField(String pattern) {
+        excludedFieldsPatterns.add(Pattern.compile(pattern));
         return this;
     }
     
     @Override
     public boolean shouldInstrumentClass(String className) {
         // Check if explicitly excluded
-        if (excludedClasses.contains(className)) {
+        if (excludedClassesPatterns.stream().anyMatch(p -> p.matcher(className).matches())) {
             return false;
         }
         
@@ -145,7 +146,7 @@ public class PatternBasedInstrumentationFilter implements InstrumentationFilter 
         String methodSpecWithDesc = methodSpec + ":" + methodDescriptor;
         
         // Check if explicitly excluded
-        if (excludedMethods.contains(methodSpec) || excludedMethods.contains(methodSpecWithDesc)) {
+        if (excludedMethodsPatterns.stream().anyMatch(p -> p.matcher(methodSpec).matches() || p.matcher(methodSpecWithDesc).matches())) {
             return false;
         }
         
@@ -167,7 +168,7 @@ public class PatternBasedInstrumentationFilter implements InstrumentationFilter 
         String fieldSpec = className + "." + fieldName;
         
         // Check if explicitly excluded
-        if (excludedFields.contains(fieldSpec)) {
+        if (excludedFieldsPatterns.stream().anyMatch(p -> p.matcher(fieldSpec).matches())) {
             return false;
         }
         
