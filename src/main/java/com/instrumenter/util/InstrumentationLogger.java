@@ -60,8 +60,9 @@ public class InstrumentationLogger {
         try {
             if (logger != null && instrumentation != null) {
                 long size = instrumentation.getObjectSize(obj);
-                logger.debug("[OBJECT SIZE] {} bytes for instance of {}", size, 
-                           obj != null ? obj.getClass().getName() : "null");
+                int objectId = System.identityHashCode(obj);
+                logger.debug("[OBJECT SIZE] ObjectID: {} | {} bytes for instance of {}", 
+                           objectId, size, obj != null ? obj.getClass().getName() : "null");
             } else if (logger != null) {
                 logger.warn("[OBJECT SIZE] Instrumentation not available, cannot measure size");
             }
