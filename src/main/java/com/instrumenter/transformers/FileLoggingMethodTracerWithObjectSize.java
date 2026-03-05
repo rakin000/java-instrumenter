@@ -197,7 +197,7 @@ public class FileLoggingMethodTracerWithObjectSize extends AbstractInstrumentati
                         // Log object size and restore for PUTFIELD
                         visitVarInsn(Opcodes.ALOAD, tempVarIndex + 2);   // Stack: ..., objectref
                         visitInsn(Opcodes.DUP);                          // Stack: ..., objectref, objectref
-                        visitMethodInsn(Opcodes.INVOKESTATIC, "com/instrumenter/util/InstrumentationLogger", "logObjectSize", 
+                        visitMethodInsn(Opcodes.INVOKESTATIC, "com/instrumenter/util/InstrumentationLogger", "logObjectSizeDeep", 
                                       "(Ljava/lang/Object;)V", false);   // Stack: ..., objectref
                         
                         // Restore and do PUTFIELD
@@ -223,7 +223,7 @@ public class FileLoggingMethodTracerWithObjectSize extends AbstractInstrumentati
                         // Log object size and restore for PUTFIELD
                         visitVarInsn(Opcodes.ALOAD, tempVarIndex + 2);   // Stack: ..., objectref
                         visitInsn(Opcodes.DUP);                          // Stack: ..., objectref, objectref
-                        visitMethodInsn(Opcodes.INVOKESTATIC, "com/instrumenter/util/InstrumentationLogger", "logObjectSize", 
+                        visitMethodInsn(Opcodes.INVOKESTATIC, "com/instrumenter/util/InstrumentationLogger", "logObjectSizeDeep", 
                                       "(Ljava/lang/Object;)V", false);   // Stack: ..., objectref
                         
                         // Restore and do PUTFIELD
@@ -245,7 +245,7 @@ public class FileLoggingMethodTracerWithObjectSize extends AbstractInstrumentati
                     // Stack: ..., objectref, value
                     visitInsn(Opcodes.SWAP);  // Stack: ..., value, objectref
                     visitInsn(Opcodes.DUP);   // Stack: ..., value, objectref, objectref
-                    visitMethodInsn(Opcodes.INVOKESTATIC, "com/instrumenter/util/InstrumentationLogger", "logObjectSize", 
+                    visitMethodInsn(Opcodes.INVOKESTATIC, "com/instrumenter/util/InstrumentationLogger", "logObjectSizeDeep", 
                                   "(Ljava/lang/Object;)V", false);  // Stack: ..., value, objectref
                     visitInsn(Opcodes.SWAP);  // Stack: ..., objectref, value
                     
