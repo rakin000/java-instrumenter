@@ -12,7 +12,8 @@ import com.instrumenter.core.BytecodeInstrumenter;
 import com.instrumenter.core.InstrumentationFilter;
 import com.instrumenter.core.PatternBasedInstrumentationFilter;
 import com.instrumenter.transformers.FieldDefTracerVisitor;
-import com.instrumenter.transformers.MethodTracerVisitor;
+import com.instrumenter.transformers.MethodTracerVisitor; 
+import com.instrumenter.transformers.FileLoggingMethodTracerVisitor;
 
 /**
  * Java agent for runtime bytecode instrumentation.
@@ -20,7 +21,8 @@ import com.instrumenter.transformers.MethodTracerVisitor;
  */
 public class InstrumenterAgent {
     
-    private static final Logger logger = LoggerFactory.getLogger(InstrumenterAgent.class);
+    //private static final Logger logger = LoggerFactory.getLogger(InstrumenterAgent.class);
+    private static final Logger logger = LoggerFactory.getLogger("Instrumentation");
     
     /**
      * Premain method called when agent is loaded with -javaagent flag.
@@ -34,12 +36,12 @@ public class InstrumenterAgent {
             logger.info("Method tracing instrumentation enabled");  
         } 
         else {
-            String[] args = agentArgs.split(" ") ;
+            String[] args = agentArgs.split(",");
             InstrumentationFilter filter = parseFilterArguments(args); 
+            logger.info("Using instrumentation filter: {}", filter);
             instrumentation.addTransformer(new MethodTracingTransformer(filter), false);
             logger.info("Method tracing instrumentation enabled with filter: {}", agentArgs);
         }
-        
     }
     
     /**
@@ -54,7 +56,7 @@ public class InstrumenterAgent {
             logger.info("Method tracing instrumentation enabled");  
         } 
         else {
-            String[] args = agentArgs.split(" ") ;
+            String[] args = agentArgs.split(",") ;
             InstrumentationFilter filter = parseFilterArguments(args); 
             instrumentation.addTransformer(new MethodTracingTransformer(filter), false);
             logger.info("Method tracing instrumentation enabled with filter: {}", agentArgs);
@@ -63,20 +65,23 @@ public class InstrumenterAgent {
     
 
     private static InstrumentationFilter parseFilterArguments(String[] args) {
-        if (args.length < 2) {
+        if (args.length < 1) {
             return defaultRuntimeFilter();
         }
+
         PatternBasedInstrumentationFilter filter = new PatternBasedInstrumentationFilter(); // Start with empty patterns, will add based on args
         
         for (int i = 0; i < args.length; i++) {
-            String arg = args[i];
+
+            String splitArgs[] = args[i].split("=");
+            String arg = splitArgs[0]; 
             
-            if (i + 1 >= args.length) {
+            if (splitArgs.length < 2) {
                 logger.warn("Filter option '{}' requires a pattern argument", arg);
                 continue;
             }
             
-            String pattern = args[i + 1];
+            String pattern = splitArgs[1];
             
             switch (arg) {
                 case "--include-class":
@@ -178,7 +183,7 @@ public class InstrumenterAgent {
                 if (filter.shouldInstrumentClass(className)) {
                     logger.debug("Instrumenting class: {}", className);
                     return instrumenter.instrument(classfileBuffer, 
-                        (classWriter) -> new MethodTracerVisitor(classWriter, filter));
+                        (classWriter) -> new FileLoggingMethodTracerVisitor(classWriter, filter));
                 }
             } catch (Exception ex) {
                 logger.error("Error instrumenting class: {}", className, ex);

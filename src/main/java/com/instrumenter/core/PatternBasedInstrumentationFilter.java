@@ -187,4 +187,16 @@ public class PatternBasedInstrumentationFilter implements InstrumentationFilter 
     private boolean isSpecialMethod(String methodName) {
         return "<init>".equals(methodName) || "<clinit>".equals(methodName);
     }
+
+
+    public String toString() {
+        return "PatternBasedInstrumentationFilter{" +
+                "classPatterns=" + classPatterns +
+                ", methodPatterns=" + methodPatterns +
+                ", fieldPatterns=" + fieldPatterns +
+                ", excludedClassesPatterns=" + excludedClassesPatterns +
+                ", excludedMethodsPatterns=" + excludedMethodsPatterns +
+                ", excludedFieldsPatterns=" + excludedFieldsPatterns +
+                '}';
+    }
 }
