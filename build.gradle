@@ -71,7 +71,7 @@ task javaAgentJar(type: Jar) {
     manifest {
         attributes(
             'Premain-Class': 'com.instrumenter.agent.InstrumenterAgent',
-            'Boot-Class-Path': '',
+            'Boot-Class-Path': 'java-instrumenter-agent.jar',
             'Can-Redefine-Classes': 'true',
             'Can-Retransform-Classes': 'true',
             'Implementation-Title': 'Java Instrumenter',

@@ -10,18 +10,19 @@ import com.instrumenter.core.AbstractInstrumentationVisitor;
 import com.instrumenter.core.InstrumentationFilter;
 
 /**
- * FileLoggingMethodTracerVisitor instruments methods to log entry and exit points to a file.
+ * FileLoggingMethodTracerWithObjectSize instruments methods to log entry and exit points to a file,
+ * and additionally logs the size of "this" object each time a field is written.
  * Uses SLF4J with logback to write logs to instrumentation.log file.
  */
-public class FileLoggingMethodTracerVisitor extends AbstractInstrumentationVisitor {
+public class FileLoggingMethodTracerWithObjectSize extends AbstractInstrumentationVisitor {
     
-    private static final Logger logger = LoggerFactory.getLogger(FileLoggingMethodTracerVisitor.class);
+    private static final Logger logger = LoggerFactory.getLogger(FileLoggingMethodTracerWithObjectSize.class);
     
-    public FileLoggingMethodTracerVisitor(ClassVisitor classVisitor) {
+    public FileLoggingMethodTracerWithObjectSize(ClassVisitor classVisitor) {
         super(classVisitor);
     }
     
-    public FileLoggingMethodTracerVisitor(ClassVisitor classVisitor, InstrumentationFilter filter) {
+    public FileLoggingMethodTracerWithObjectSize(ClassVisitor classVisitor, InstrumentationFilter filter) {
         super(classVisitor, filter);
     }
     
@@ -40,7 +41,7 @@ public class FileLoggingMethodTracerVisitor extends AbstractInstrumentationVisit
         }
         
         logger.debug("Instrumenting method: {}.{}{}", className, name, descriptor);
-        return new FileLoggingMethodTracingVisitor(methodVisitor, className, name, descriptor, access, filter);
+        return new FileLoggingMethodTracingVisitorWithObjectSize(methodVisitor, className, name, descriptor, access, filter);
     }
     
     private boolean isSyntheticOrSpecial(int access, String name) {
@@ -50,9 +51,9 @@ public class FileLoggingMethodTracerVisitor extends AbstractInstrumentationVisit
     }
     
     /**
-     * Inner class that instruments individual methods with file logging.
+     * Inner class that instruments individual methods with file logging and object size tracking.
      */
-    public static class FileLoggingMethodTracingVisitor extends MethodVisitor {
+    public static class FileLoggingMethodTracingVisitorWithObjectSize extends MethodVisitor {
         
         private final String className;
         private final String methodName;
@@ -60,7 +61,7 @@ public class FileLoggingMethodTracerVisitor extends AbstractInstrumentationVisit
         private final int access;
         private final InstrumentationFilter filter;
 
-        public FileLoggingMethodTracingVisitor(MethodVisitor methodVisitor, String className, 
+        public FileLoggingMethodTracingVisitorWithObjectSize(MethodVisitor methodVisitor, String className, 
                                    String methodName, String descriptor, int access) {
             super(Opcodes.ASM9, methodVisitor);
             this.className = className;
@@ -70,7 +71,7 @@ public class FileLoggingMethodTracerVisitor extends AbstractInstrumentationVisit
             this.filter = null;
         }
 
-        public FileLoggingMethodTracingVisitor(MethodVisitor methodVisitor, String className, 
+        public FileLoggingMethodTracingVisitorWithObjectSize(MethodVisitor methodVisitor, String className, 
                                    String methodName, String descriptor, int access, InstrumentationFilter filter) {
             super(Opcodes.ASM9, methodVisitor);
             this.className = className;
@@ -147,7 +148,20 @@ public class FileLoggingMethodTracerVisitor extends AbstractInstrumentationVisit
                 // Log the message
                 visitMethodInsn(Opcodes.INVOKESTATIC, "com/instrumenter/util/InstrumentationLogger", "logFieldAccess", 
                               "(Ljava/lang/String;)V", false);
-                // Now do the actual PUTFIELD with original stack
+                
+                // Now log the size of "this" object
+                // Stack at this point: ..., objectref, value
+                // SWAP to get objectref on top: ..., value, objectref
+                visitInsn(Opcodes.SWAP);
+                // DUP objectref to keep a copy for PUTFIELD: ..., value, objectref, objectref
+                visitInsn(Opcodes.DUP);
+                // Call logObjectSize with one copy: ..., value, objectref
+                visitMethodInsn(Opcodes.INVOKESTATIC, "com/instrumenter/util/InstrumentationLogger", "logObjectSize", 
+                              "(Ljava/lang/Object;)V", false);
+                // SWAP back to original order: ..., objectref, value
+                visitInsn(Opcodes.SWAP);
+                
+                // Now do the actual PUTFIELD with correct stack
                 super.visitFieldInsn(opcode, owner, name, descriptor);
             } else {
                 super.visitFieldInsn(opcode, owner, name, descriptor);

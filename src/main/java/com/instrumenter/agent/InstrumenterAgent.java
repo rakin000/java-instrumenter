@@ -4,6 +4,7 @@ import java.lang.instrument.ClassFileTransformer;
 import java.lang.instrument.IllegalClassFormatException;
 import java.lang.instrument.Instrumentation;
 import java.security.ProtectionDomain;
+import java.util.regex.Pattern;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -14,6 +15,8 @@ import com.instrumenter.core.PatternBasedInstrumentationFilter;
 import com.instrumenter.transformers.FieldDefTracerVisitor;
 import com.instrumenter.transformers.MethodTracerVisitor; 
 import com.instrumenter.transformers.FileLoggingMethodTracerVisitor;
+import com.instrumenter.transformers.FileLoggingMethodTracerWithObjectSize;
+import com.instrumenter.util.InstrumentationLogger;
 
 /**
  * Java agent for runtime bytecode instrumentation.
@@ -28,6 +31,9 @@ public class InstrumenterAgent {
      * Premain method called when agent is loaded with -javaagent flag.
      */
     public static void premain(String agentArgs, Instrumentation instrumentation) {
+        // Set the Instrumentation instance for use in InstrumentationLogger
+        InstrumentationLogger.setInstrumentation(instrumentation);
+        
         logger.info("Java Instrumenter Agent loaded");
         logger.info("Agent arguments: {}", agentArgs); 
         
@@ -48,6 +54,9 @@ public class InstrumenterAgent {
      * Agentmain method called when agent is attached dynamically.
      */
     public static void agentmain(String agentArgs, Instrumentation instrumentation) {
+        // Set the Instrumentation instance for use in InstrumentationLogger
+        InstrumentationLogger.setInstrumentation(instrumentation);
+        
         logger.info("Java Instrumenter Agent attached dynamically");
         logger.info("Agent arguments: {}", agentArgs);
 
@@ -68,13 +77,13 @@ public class InstrumenterAgent {
         if (args.length < 1) {
             return defaultRuntimeFilter();
         }
-
-        PatternBasedInstrumentationFilter filter = new PatternBasedInstrumentationFilter(); // Start with empty patterns, will add based on args
+      //  logger.debug("Parsing filter arguments: {}", String.join(" ", args));
+        PatternBasedInstrumentationFilter filter = defaultExclude(); // new PatternBasedInstrumentationFilter(); // Start with empty patterns, will add based on args
         
-        for (int i = 0; i < args.length; i++) {
-
-            String splitArgs[] = args[i].split("=");
-            String arg = splitArgs[0]; 
+        for (String arg: args) {
+//            logger.debug("Processing argument: {}", arg);
+            String splitArgs[] = arg.split("=");
+            String option = splitArgs[0]; 
             
             if (splitArgs.length < 2) {
                 logger.warn("Filter option '{}' requires a pattern argument", arg);
@@ -82,37 +91,32 @@ public class InstrumenterAgent {
             }
             
             String pattern = splitArgs[1];
-            
-            switch (arg) {
+           
+ //           logger.debug("Processing filter argument: {} with pattern: {}", arg, pattern);
+            switch (option) {
                 case "--include-class":
                     filter.includeClass(pattern);
                     logger.debug("Added include class pattern: {}", pattern);
-                    i++;
                     break;
                 case "--exclude-class":
                     filter.excludeClass(pattern);
                     logger.debug("Added exclude class pattern: {}", pattern);
-                    i++;
                     break;
                 case "--include-method":
                     filter.includeMethod(pattern);
                     logger.debug("Added include method pattern: {}", pattern);
-                    i++;
                     break;
                 case "--exclude-method":
                     filter.excludeMethod(pattern);
                     logger.debug("Added exclude method pattern: {}", pattern);
-                    i++;
                     break;
                 case "--include-field":
                     filter.includeField(pattern);
                     logger.debug("Added include field pattern: {}", pattern);
-                    i++;
                     break;
                 case "--exclude-field":
                     filter.excludeField(pattern);
                     logger.debug("Added exclude field pattern: {}", pattern);
-                    i++;
                     break;
                 default:
                     logger.warn("Unknown filter option: {}", arg);
@@ -122,6 +126,19 @@ public class InstrumenterAgent {
         return filter; 
     } 
 
+
+    private static PatternBasedInstrumentationFilter defaultExclude() { 
+        return new PatternBasedInstrumentationFilter()
+            .excludeClass("java/.*") 
+            .excludeClass("javax/.*")
+            .excludeClass("sun/.*")
+            .excludeClass("com/sun/.*")
+            .excludeClass("com/instrumenter/.*")
+            .excludeClass("org/slf4j/.*")
+            .excludeClass("org/ow2/asm/.*")
+            .excludeClass("ch/qos/logback/.*")
+            .excludeClass("jdk/.*");
+    }
     private static InstrumentationFilter defaultRuntimeFilter() {
         return new PatternBasedInstrumentationFilter()
             .allClass()
@@ -183,7 +200,7 @@ public class InstrumenterAgent {
                 if (filter.shouldInstrumentClass(className)) {
                     logger.debug("Instrumenting class: {}", className);
                     return instrumenter.instrument(classfileBuffer, 
-                        (classWriter) -> new FileLoggingMethodTracerVisitor(classWriter, filter));
+                        (classWriter) -> new FileLoggingMethodTracerWithObjectSize(classWriter, filter));
                 }
             } catch (Exception ex) {
                 logger.error("Error instrumenting class: {}", className, ex);
