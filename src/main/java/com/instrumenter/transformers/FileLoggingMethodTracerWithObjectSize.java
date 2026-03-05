@@ -121,48 +121,137 @@ public class FileLoggingMethodTracerWithObjectSize extends AbstractInstrumentati
                 return;
             }
 
+            boolean isLongOrDouble = descriptor.equals("J") || descriptor.equals("D");
+            int tempVarIndex = 100; // Use a high index to avoid conflicts
+
             if (opcode == Opcodes.GETFIELD) {
-                // First, do the GETFIELD to get the value on the stack
+                // Do the GETFIELD to get the value on the stack
                 super.visitFieldInsn(opcode, owner, name, descriptor);
-                // Now duplicate the value for logging
-                visitInsn(Opcodes.DUP);
-                // Box the value if primitive and convert to String
-                boxAndConvertToString(descriptor);
-                visitLdcInsn("[FIELD READ] " + owner + "." + name + " = ");
-                visitInsn(Opcodes.SWAP);
-                visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", 
-                              "(Ljava/lang/String;)Ljava/lang/String;", false);
-                visitMethodInsn(Opcodes.INVOKESTATIC, "com/instrumenter/util/InstrumentationLogger", "logFieldAccess", 
-                              "(Ljava/lang/String;)V", false);
+                
+                if (isLongOrDouble) {
+                    // For long/double: store to temp variable, log, then restore
+                    // Stack before: ..., long_value (2 slots)
+                    if (descriptor.equals("J")) {
+                        visitVarInsn(Opcodes.LSTORE, tempVarIndex);  // Stack: ...
+                        visitVarInsn(Opcodes.LLOAD, tempVarIndex);   // Stack: ..., long_value
+                        // Now log the value
+                        visitVarInsn(Opcodes.LLOAD, tempVarIndex);   // Stack: ..., long_value, long_value
+                        visitMethodInsn(Opcodes.INVOKESTATIC, "java/lang/Long", "valueOf", 
+                                      "(J)Ljava/lang/Long;", false);  // Stack: ..., long_value, Long
+                        visitMethodInsn(Opcodes.INVOKESTATIC, "java/lang/String", "valueOf", 
+                                      "(Ljava/lang/Object;)Ljava/lang/String;", false);  // Stack: ..., long_value, String
+                        visitLdcInsn("[FIELD READ] " + owner + "." + name + " = ");      // Stack: ..., long_value, String, String
+                        visitInsn(Opcodes.SWAP);                    // Stack: ..., long_value, String, String
+                        visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", 
+                                      "(Ljava/lang/String;)Ljava/lang/String;", false);  // Stack: ..., long_value, String
+                        visitMethodInsn(Opcodes.INVOKESTATIC, "com/instrumenter/util/InstrumentationLogger", "logFieldAccess", 
+                                      "(Ljava/lang/String;)V", false);  // Stack: ..., long_value
+                    } else {
+                        visitVarInsn(Opcodes.DSTORE, tempVarIndex);  // Stack: ...
+                        visitVarInsn(Opcodes.DLOAD, tempVarIndex);   // Stack: ..., double_value
+                        // Now log the value
+                        visitVarInsn(Opcodes.DLOAD, tempVarIndex);   // Stack: ..., double_value, double_value
+                        visitMethodInsn(Opcodes.INVOKESTATIC, "java/lang/Double", "valueOf", 
+                                      "(D)Ljava/lang/Double;", false);  // Stack: ..., double_value, Double
+                        visitMethodInsn(Opcodes.INVOKESTATIC, "java/lang/String", "valueOf", 
+                                      "(Ljava/lang/Object;)Ljava/lang/String;", false);  // Stack: ..., double_value, String
+                        visitLdcInsn("[FIELD READ] " + owner + "." + name + " = ");      // Stack: ..., double_value, String, String
+                        visitInsn(Opcodes.SWAP);                    // Stack: ..., double_value, String, String
+                        visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", 
+                                      "(Ljava/lang/String;)Ljava/lang/String;", false);  // Stack: ..., double_value, String
+                        visitMethodInsn(Opcodes.INVOKESTATIC, "com/instrumenter/util/InstrumentationLogger", "logFieldAccess", 
+                                      "(Ljava/lang/String;)V", false);  // Stack: ..., double_value
+                    }
+                } else {
+                    // For other types: simple DUP and log
+                    visitInsn(Opcodes.DUP);
+                    boxAndConvertToString(descriptor);
+                    visitLdcInsn("[FIELD READ] " + owner + "." + name + " = ");
+                    visitInsn(Opcodes.SWAP);
+                    visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", 
+                                  "(Ljava/lang/String;)Ljava/lang/String;", false);
+                    visitMethodInsn(Opcodes.INVOKESTATIC, "com/instrumenter/util/InstrumentationLogger", "logFieldAccess", 
+                                  "(Ljava/lang/String;)V", false);
+                }
             } else if (opcode == Opcodes.PUTFIELD) {
                 // Stack before: ..., objectref, value
-                // DUP the value to keep a copy for logging
-                visitInsn(Opcodes.DUP);
-                // Box the value if primitive and convert to String
-                boxAndConvertToString(descriptor);
-                // Construct log message: "[FIELD WRITE] owner.name = value"
-                visitLdcInsn("[FIELD WRITE] " + owner + "." + name + " = ");
-                visitInsn(Opcodes.SWAP);
-                visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", 
-                              "(Ljava/lang/String;)Ljava/lang/String;", false);
-                // Log the message
-                visitMethodInsn(Opcodes.INVOKESTATIC, "com/instrumenter/util/InstrumentationLogger", "logFieldAccess", 
-                              "(Ljava/lang/String;)V", false);
-                
-                // Now log the size of "this" object
-                // Stack at this point: ..., objectref, value
-                // SWAP to get objectref on top: ..., value, objectref
-                visitInsn(Opcodes.SWAP);
-                // DUP objectref to keep a copy for PUTFIELD: ..., value, objectref, objectref
-                visitInsn(Opcodes.DUP);
-                // Call logObjectSize with one copy: ..., value, objectref
-                visitMethodInsn(Opcodes.INVOKESTATIC, "com/instrumenter/util/InstrumentationLogger", "logObjectSize", 
-                              "(Ljava/lang/Object;)V", false);
-                // SWAP back to original order: ..., objectref, value
-                visitInsn(Opcodes.SWAP);
-                
-                // Now do the actual PUTFIELD with correct stack
-                super.visitFieldInsn(opcode, owner, name, descriptor);
+                if (isLongOrDouble) {
+                    // Store objectref and value to temporary variables
+                    if (descriptor.equals("J")) {
+                        visitVarInsn(Opcodes.LSTORE, tempVarIndex);      // Stack: ..., objectref
+                        visitVarInsn(Opcodes.ASTORE, tempVarIndex + 2);  // Stack: ...
+                        
+                        // Log the value
+                        visitVarInsn(Opcodes.LLOAD, tempVarIndex);       // Stack: ..., long_value
+                        visitMethodInsn(Opcodes.INVOKESTATIC, "java/lang/Long", "valueOf", 
+                                      "(J)Ljava/lang/Long;", false);     // Stack: ..., Long
+                        visitMethodInsn(Opcodes.INVOKESTATIC, "java/lang/String", "valueOf", 
+                                      "(Ljava/lang/Object;)Ljava/lang/String;", false);  // Stack: ..., String
+                        visitLdcInsn("[FIELD WRITE] " + owner + "." + name + " = ");     // Stack: ..., String, String
+                        visitInsn(Opcodes.SWAP);                         // Stack: ..., String, String
+                        visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", 
+                                      "(Ljava/lang/String;)Ljava/lang/String;", false);  // Stack: ..., String
+                        visitMethodInsn(Opcodes.INVOKESTATIC, "com/instrumenter/util/InstrumentationLogger", "logFieldAccess", 
+                                      "(Ljava/lang/String;)V", false);   // Stack: ...
+                        
+                        // Log object size and restore for PUTFIELD
+                        visitVarInsn(Opcodes.ALOAD, tempVarIndex + 2);   // Stack: ..., objectref
+                        visitInsn(Opcodes.DUP);                          // Stack: ..., objectref, objectref
+                        visitMethodInsn(Opcodes.INVOKESTATIC, "com/instrumenter/util/InstrumentationLogger", "logObjectSize", 
+                                      "(Ljava/lang/Object;)V", false);   // Stack: ..., objectref
+                        
+                        // Restore and do PUTFIELD
+                        visitVarInsn(Opcodes.LLOAD, tempVarIndex);       // Stack: ..., objectref, long_value
+                        super.visitFieldInsn(opcode, owner, name, descriptor);
+                    } else {
+                        visitVarInsn(Opcodes.DSTORE, tempVarIndex);      // Stack: ..., objectref
+                        visitVarInsn(Opcodes.ASTORE, tempVarIndex + 2);  // Stack: ...
+                        
+                        // Log the value
+                        visitVarInsn(Opcodes.DLOAD, tempVarIndex);       // Stack: ..., double_value
+                        visitMethodInsn(Opcodes.INVOKESTATIC, "java/lang/Double", "valueOf", 
+                                      "(D)Ljava/lang/Double;", false);   // Stack: ..., Double
+                        visitMethodInsn(Opcodes.INVOKESTATIC, "java/lang/String", "valueOf", 
+                                      "(Ljava/lang/Object;)Ljava/lang/String;", false);  // Stack: ..., String
+                        visitLdcInsn("[FIELD WRITE] " + owner + "." + name + " = ");     // Stack: ..., String, String
+                        visitInsn(Opcodes.SWAP);                         // Stack: ..., String, String
+                        visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", 
+                                      "(Ljava/lang/String;)Ljava/lang/String;", false);  // Stack: ..., String
+                        visitMethodInsn(Opcodes.INVOKESTATIC, "com/instrumenter/util/InstrumentationLogger", "logFieldAccess", 
+                                      "(Ljava/lang/String;)V", false);   // Stack: ...
+                        
+                        // Log object size and restore for PUTFIELD
+                        visitVarInsn(Opcodes.ALOAD, tempVarIndex + 2);   // Stack: ..., objectref
+                        visitInsn(Opcodes.DUP);                          // Stack: ..., objectref, objectref
+                        visitMethodInsn(Opcodes.INVOKESTATIC, "com/instrumenter/util/InstrumentationLogger", "logObjectSize", 
+                                      "(Ljava/lang/Object;)V", false);   // Stack: ..., objectref
+                        
+                        // Restore and do PUTFIELD
+                        visitVarInsn(Opcodes.DLOAD, tempVarIndex);       // Stack: ..., objectref, double_value
+                        super.visitFieldInsn(opcode, owner, name, descriptor);
+                    }
+                } else {
+                    // For non-long/double types: simple DUP and log
+                    visitInsn(Opcodes.DUP);
+                    boxAndConvertToString(descriptor);
+                    visitLdcInsn("[FIELD WRITE] " + owner + "." + name + " = ");
+                    visitInsn(Opcodes.SWAP);
+                    visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", 
+                                  "(Ljava/lang/String;)Ljava/lang/String;", false);
+                    visitMethodInsn(Opcodes.INVOKESTATIC, "com/instrumenter/util/InstrumentationLogger", "logFieldAccess", 
+                                  "(Ljava/lang/String;)V", false);
+                    
+                    // Log object size
+                    // Stack: ..., objectref, value
+                    visitInsn(Opcodes.SWAP);  // Stack: ..., value, objectref
+                    visitInsn(Opcodes.DUP);   // Stack: ..., value, objectref, objectref
+                    visitMethodInsn(Opcodes.INVOKESTATIC, "com/instrumenter/util/InstrumentationLogger", "logObjectSize", 
+                                  "(Ljava/lang/Object;)V", false);  // Stack: ..., value, objectref
+                    visitInsn(Opcodes.SWAP);  // Stack: ..., objectref, value
+                    
+                    // Do the actual PUTFIELD
+                    super.visitFieldInsn(opcode, owner, name, descriptor);
+                }
             } else {
                 super.visitFieldInsn(opcode, owner, name, descriptor);
             }
