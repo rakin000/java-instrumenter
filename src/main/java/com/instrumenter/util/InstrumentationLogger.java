@@ -5,8 +5,7 @@ import org.slf4j.LoggerFactory;
 
 import java.lang.instrument.Instrumentation;
 import java.lang.reflect.Field;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.Map;
+import java.lang.reflect.Method;
 import java.util.Set;
 import java.util.HashSet;
 
@@ -17,7 +16,10 @@ public class InstrumentationLogger {
     private static final Logger logger;
     private static Instrumentation instrumentation;
     private static volatile boolean jolAvailable = true;         // set to false if JOL fails to initialize
+    private static volatile boolean jammAvailable = true;        // set to false if JAMM is missing/fails
     private static volatile boolean reflectionAvailable = true;  // set to false if SecurityManager blocks field access
+    private static volatile Object jammMeter;
+    private static volatile Method jammMeasureDeepMethod;
    // private static final Map<Integer, Long> cumulativeSizes = new ConcurrentHashMap<>();
     
     static {
@@ -36,6 +38,50 @@ public class InstrumentationLogger {
      */
     public static void setInstrumentation(Instrumentation inst) {
         instrumentation = inst;
+    }
+
+    private static Long measureDeepSizeWithJamm(Object obj) {
+        if (!jammAvailable || obj == null) {
+            return null;
+        }
+
+        try {
+            if (jammMeter == null || jammMeasureDeepMethod == null) {
+                synchronized (InstrumentationLogger.class) {
+                    if (jammMeter == null || jammMeasureDeepMethod == null) {
+                        Class<?> memoryMeterClass = Class.forName("org.github.jamm.MemoryMeter");
+
+                        Object meter;
+                        try {
+                            // Preferred in recent JAMM versions
+                            Method builderMethod = memoryMeterClass.getMethod("builder");
+                            Object builder = builderMethod.invoke(null);
+                            Method buildMethod = builder.getClass().getMethod("build");
+                            meter = buildMethod.invoke(builder);
+                        } catch (NoSuchMethodException noBuilder) {
+                            // Backward-compatible fallback
+                            meter = memoryMeterClass.getDeclaredConstructor().newInstance();
+                        }
+
+                        Method measureDeepMethod = memoryMeterClass.getMethod("measureDeep", Object.class);
+                        jammMeter = meter;
+                        jammMeasureDeepMethod = measureDeepMethod;
+                    }
+                }
+            }
+
+            Object result = jammMeasureDeepMethod.invoke(jammMeter, obj);
+            if (result instanceof Number) {
+                return ((Number) result).longValue();
+            }
+            return null;
+        } catch (Throwable e) {
+            jammAvailable = false;
+            if (logger != null) {
+                logger.warn("[OBJECT SIZE DEEP] JAMM unavailable ({}), falling back to reflection-based calculation", e.getMessage());
+            }
+            return null;
+        }
     }
     
     public static void logEntry(String message) {
@@ -186,19 +232,28 @@ public class InstrumentationLogger {
                 return;
             }
 
-            if (jolAvailable) {
-                try {
-                    GraphLayout layout = GraphLayout.parseInstance(obj);
-                    long deepSize = layout.totalSize();
-                    logger.debug("[OBJECT SIZE DEEP] ObjectID: {} | Deep: {} bytes | Type: {}",
-                            System.identityHashCode(obj),
-                            deepSize,
-                            obj.getClass().getName());
-                    return;
-                } catch (Throwable e) {
-                    jolAvailable = false;
-                    logger.warn("[OBJECT SIZE DEEP] JOL unavailable ({}), falling back to reflection-based calculation", e.getMessage());
-                }
+            // if (jolAvailable) {
+            //     try {
+            //         GraphLayout layout = GraphLayout.parseInstance(obj);
+            //         long deepSize = layout.totalSize();
+            //         logger.debug("[OBJECT SIZE DEEP] ObjectID: {} | Deep: {} bytes | Type: {}",
+            //                 System.identityHashCode(obj),
+            //                 deepSize,
+            //                 obj.getClass().getName());
+            //         return;
+            //     } catch (Throwable e) {
+            //         jolAvailable = false;
+            //         logger.warn("[OBJECT SIZE DEEP] JOL unavailable ({}), falling back to reflection-based calculation", e.getMessage());
+            //     }
+            // }
+
+            Long jammSize = measureDeepSizeWithJamm(obj);
+            if (jammSize != null) {
+                logger.debug("[OBJECT SIZE DEEP] ObjectID: {} | Deep: {} bytes | Type: {} | Provider: JAMM",
+                        System.identityHashCode(obj),
+                        jammSize,
+                        obj.getClass().getName());
+                return;
             }
 
             // Fallback: use instrumentation-based deep size
