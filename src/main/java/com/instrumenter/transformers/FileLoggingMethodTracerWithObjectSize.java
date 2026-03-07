@@ -82,6 +82,12 @@ public class FileLoggingMethodTracerWithObjectSize extends AbstractInstrumentati
         }
         
 
+        public void logThisObjectSize() {
+            visitVarInsn(Opcodes.ALOAD, 0); // Load "this" onto the stack
+            visitMethodInsn(Opcodes.INVOKESTATIC, "com/instrumenter/util/InstrumentationLogger", "logObjectSizeDeep", 
+                          "(Ljava/lang/Object;)V", false); 
+        }
+
         @Override
         public void visitCode() {
             if (filter != null && !filter.shouldInstrumentMethod(className, methodName, descriptor)) {
@@ -92,8 +98,8 @@ public class FileLoggingMethodTracerWithObjectSize extends AbstractInstrumentati
             // Call InstrumentationLogger.logEntry()
             visitLdcInsn("[ENTRY] " + className + "." + methodName + descriptor);
             visitMethodInsn(Opcodes.INVOKESTATIC, "com/instrumenter/util/InstrumentationLogger", "logEntry", 
-                          "(Ljava/lang/String;)V", false);
-            
+                          "(Ljava/lang/String;)V", false); 
+                          
             super.visitCode();
         }
         

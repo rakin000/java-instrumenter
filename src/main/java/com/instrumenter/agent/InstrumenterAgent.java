@@ -53,15 +53,15 @@ public class InstrumenterAgent {
         
         // Inject instrumentation into JOL's InstrumentationSupport so GraphLayout.parseInstance()
         // works correctly without needing dynamic attach or -Djdk.attach.allowAttachSelf
-        try {
-            Class<?> jolSupport = Class.forName("org.openjdk.jol.vm.InstrumentationSupport");
-            java.lang.reflect.Method jolPremain = jolSupport.getDeclaredMethod("premain", String.class, Instrumentation.class);
-            jolPremain.setAccessible(true);
-            jolPremain.invoke(null, null, instrumentation);
-            logger.info("JOL instrumentation injected successfully");
-        } catch (Exception e) {
-            logger.warn("Could not inject instrumentation into JOL (deep size will use fallback): {}", e.getMessage());
-        }
+        // try {
+        //     Class<?> jolSupport = Class.forName("org.openjdk.jol.vm.InstrumentationSupport");
+        //     java.lang.reflect.Method jolPremain = jolSupport.getDeclaredMethod("premain", String.class, Instrumentation.class);
+        //     jolPremain.setAccessible(true);
+        //     jolPremain.invoke(null, null, instrumentation);
+        //     logger.info("JOL instrumentation injected successfully");
+        // } catch (Exception e) {
+        //     logger.warn("Could not inject instrumentation into JOL (deep size will use fallback): {}", e.getMessage());
+        // }
     }
     
     /**
@@ -87,15 +87,15 @@ public class InstrumenterAgent {
         }
 
         // Inject instrumentation into JOL's InstrumentationSupport
-        try {
-            Class<?> jolSupport = Class.forName("org.openjdk.jol.vm.InstrumentationSupport");
-            java.lang.reflect.Method jolPremain = jolSupport.getDeclaredMethod("premain", String.class, Instrumentation.class);
-            jolPremain.setAccessible(true);
-            jolPremain.invoke(null, null, instrumentation);
-            logger.info("JOL instrumentation injected successfully");
-        } catch (Exception e) {
-            logger.warn("Could not inject instrumentation into JOL (deep size will use fallback): {}", e.getMessage());
-        }
+        // try {
+        //     Class<?> jolSupport = Class.forName("org.openjdk.jol.vm.InstrumentationSupport");
+        //     java.lang.reflect.Method jolPremain = jolSupport.getDeclaredMethod("agentmain", String.class, Instrumentation.class);
+        //     jolPremain.setAccessible(true);
+        //     jolPremain.invoke(null, null, instrumentation);
+        //     logger.info("JOL instrumentation injected successfully");
+        // } catch (Exception e) {
+        //     logger.warn("Could not inject instrumentation into JOL (deep size will use fallback): {}", e.getMessage());
+        // }
  
     }
     

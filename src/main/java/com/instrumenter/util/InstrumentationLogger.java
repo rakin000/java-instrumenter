@@ -233,31 +233,36 @@ public class InstrumentationLogger {
             }
 
             // if (jolAvailable) {
-            //     try {
-            //         GraphLayout layout = GraphLayout.parseInstance(obj);
-            //         long deepSize = layout.totalSize();
-            //         logger.debug("[OBJECT SIZE DEEP] ObjectID: {} | Deep: {} bytes | Type: {}",
-            //                 System.identityHashCode(obj),
-            //                 deepSize,
-            //                 obj.getClass().getName());
-            //         return;
-            //     } catch (Throwable e) {
-            //         jolAvailable = false;
-            //         logger.warn("[OBJECT SIZE DEEP] JOL unavailable ({}), falling back to reflection-based calculation", e.getMessage());
-            //     }
+                try {
+                    GraphLayout layout = GraphLayout.parseInstance(obj);
+                    long deepSize = layout.totalSize();
+                    logger.debug("[OBJECT SIZE DEEP] ObjectID: {} | Deep: {} bytes | Type: {}",
+                            System.identityHashCode(obj),
+                            deepSize,
+                            obj.getClass().getName());
+                    logger.info("[OBJECT SIZE DEEP FOOTPRINT] Object: {}#{} \n{}",
+                            obj.getClass().getName(),
+                            System.identityHashCode(obj),
+                            layout.toFootprint()
+                    );
+                    return;
+                } catch (Throwable e) {
+                    jolAvailable = false;
+                    logger.warn("[OBJECT SIZE DEEP] JOL unavailable ({}), falling back to reflection-based calculation", e.getMessage());
+                }
             // }
 
-            Long jammSize = measureDeepSizeWithJamm(obj);
-            if (jammSize != null) {
-                logger.debug("[OBJECT SIZE DEEP] ObjectID: {} | Deep: {} bytes | Type: {} | Provider: JAMM",
-                        System.identityHashCode(obj),
-                        jammSize,
-                        obj.getClass().getName());
-                return;
-            }
+            // Long jammSize = measureDeepSizeWithJamm(obj);
+            // if (jammSize != null) {
+            //     logger.debug("[OBJECT SIZE DEEP] ObjectID: {} | Deep: {} bytes | Type: {} | Provider: JAMM",
+            //             System.identityHashCode(obj),
+            //             jammSize,
+            //             obj.getClass().getName());
+            //     return;
+            // }
 
-            // Fallback: use instrumentation-based deep size
-            logObjectSizeDeepInstrumenter(obj);
+            // // Fallback: use instrumentation-based deep size
+            // logObjectSizeDeepInstrumenter(obj);
         }
     }
 }
