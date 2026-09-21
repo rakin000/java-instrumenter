@@ -4,6 +4,7 @@ import java.lang.instrument.ClassFileTransformer;
 import java.lang.instrument.IllegalClassFormatException;
 import java.lang.instrument.Instrumentation;
 import java.security.ProtectionDomain;
+import java.util.regex.Pattern;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -12,7 +13,10 @@ import com.instrumenter.core.BytecodeInstrumenter;
 import com.instrumenter.core.InstrumentationFilter;
 import com.instrumenter.core.PatternBasedInstrumentationFilter;
 import com.instrumenter.transformers.FieldDefTracerVisitor;
-import com.instrumenter.transformers.MethodTracerVisitor;
+import com.instrumenter.transformers.MethodTracerVisitor; 
+import com.instrumenter.transformers.FileLoggingMethodTracerVisitor;
+import com.instrumenter.transformers.FileLoggingMethodTracerWithObjectSize;
+import com.instrumenter.util.InstrumentationLogger;
 
 /**
  * Java agent for runtime bytecode instrumentation.
@@ -20,85 +24,126 @@ import com.instrumenter.transformers.MethodTracerVisitor;
  */
 public class InstrumenterAgent {
     
-    private static final Logger logger = LoggerFactory.getLogger(InstrumenterAgent.class);
+    //private static final Logger logger = LoggerFactory.getLogger(InstrumenterAgent.class);
+    private static final Logger logger = LoggerFactory.getLogger("Instrumentation");
     
     /**
      * Premain method called when agent is loaded with -javaagent flag.
      */
     public static void premain(String agentArgs, Instrumentation instrumentation) {
+        // Set the Instrumentation instance for use in InstrumentationLogger
+        InstrumentationLogger.setInstrumentation(instrumentation);
+
+        
+        
         logger.info("Java Instrumenter Agent loaded");
         logger.info("Agent arguments: {}", agentArgs); 
         
         if (agentArgs == null ) {
-            // Register the class file transformer
             instrumentation.addTransformer(new MethodTracingTransformer(), false);
             logger.info("Method tracing instrumentation enabled");  
         } 
         else {
-            String[] args = agentArgs.split(" ") ;
+            String[] args = agentArgs.split(",");
             InstrumentationFilter filter = parseFilterArguments(args); 
+            logger.info("Using instrumentation filter: {}", filter);
             instrumentation.addTransformer(new MethodTracingTransformer(filter), false);
             logger.info("Method tracing instrumentation enabled with filter: {}", agentArgs);
         }
         
+        // Inject instrumentation into JOL's InstrumentationSupport so GraphLayout.parseInstance()
+        // works correctly without needing dynamic attach or -Djdk.attach.allowAttachSelf
+        try {
+            Class<?> jolSupport = Class.forName("org.openjdk.jol.vm.InstrumentationSupport");
+            java.lang.reflect.Method jolPremain = jolSupport.getDeclaredMethod("premain", String.class, Instrumentation.class);
+            jolPremain.setAccessible(true);
+            jolPremain.invoke(null, null, instrumentation);
+            logger.info("JOL instrumentation injected successfully");
+        } catch (Exception e) {
+            logger.warn("Could not inject instrumentation into JOL (deep size will use fallback): {}", e.getMessage());
+        }
     }
     
     /**
      * Agentmain method called when agent is attached dynamically.
      */
     public static void agentmain(String agentArgs, Instrumentation instrumentation) {
+        // Set the Instrumentation instance for use in InstrumentationLogger
+        InstrumentationLogger.setInstrumentation(instrumentation);
+
+       
         logger.info("Java Instrumenter Agent attached dynamically");
-  //      instrumentation.addTransformer(new MethodTracingTransformer());
-        instrumentation.addTransformer(new MethodTracingTransformer());
+        logger.info("Agent arguments: {}", agentArgs);
+
+        if (agentArgs == null ) {
+            instrumentation.addTransformer(new MethodTracingTransformer(), false);
+            logger.info("Method tracing instrumentation enabled");  
+        } 
+        else {
+            String[] args = agentArgs.split(",") ;
+            InstrumentationFilter filter = parseFilterArguments(args); 
+            instrumentation.addTransformer(new MethodTracingTransformer(filter), false);
+            logger.info("Method tracing instrumentation enabled with filter: {}", agentArgs);
+        }
+
+        // Inject instrumentation into JOL's InstrumentationSupport
+        try {
+            Class<?> jolSupport = Class.forName("org.openjdk.jol.vm.InstrumentationSupport");
+            java.lang.reflect.Method jolPremain = jolSupport.getDeclaredMethod("premain", String.class, Instrumentation.class);
+            jolPremain.setAccessible(true);
+            jolPremain.invoke(null, null, instrumentation);
+            logger.info("JOL instrumentation injected successfully");
+        } catch (Exception e) {
+            logger.warn("Could not inject instrumentation into JOL (deep size will use fallback): {}", e.getMessage());
+        }
+ 
     }
     
 
     private static InstrumentationFilter parseFilterArguments(String[] args) {
-        if (args.length < 2) {
+        if (args.length < 1) {
             return defaultRuntimeFilter();
         }
-        PatternBasedInstrumentationFilter filter = new PatternBasedInstrumentationFilter(); // Start with empty patterns, will add based on args
+      //  logger.debug("Parsing filter arguments: {}", String.join(" ", args));
+        PatternBasedInstrumentationFilter filter = defaultExclude(); // new PatternBasedInstrumentationFilter(); // Start with empty patterns, will add based on args
         
-        for (int i = 0; i < args.length; i++) {
-            String arg = args[i];
+        for (String arg: args) {
+//            logger.debug("Processing argument: {}", arg);
+            String splitArgs[] = arg.split("=");
+            String option = splitArgs[0]; 
             
-            if (i + 1 >= args.length) {
+            if (splitArgs.length < 2) {
                 logger.warn("Filter option '{}' requires a pattern argument", arg);
                 continue;
             }
             
-            String pattern = args[i + 1];
-            
-            switch (arg) {
+            String pattern = splitArgs[1];
+           
+ //           logger.debug("Processing filter argument: {} with pattern: {}", arg, pattern);
+            switch (option) {
                 case "--include-class":
                     filter.includeClass(pattern);
                     logger.debug("Added include class pattern: {}", pattern);
-                    i++;
                     break;
                 case "--exclude-class":
                     filter.excludeClass(pattern);
                     logger.debug("Added exclude class pattern: {}", pattern);
-                    i++;
                     break;
                 case "--include-method":
                     filter.includeMethod(pattern);
                     logger.debug("Added include method pattern: {}", pattern);
-                    i++;
                     break;
                 case "--exclude-method":
                     filter.excludeMethod(pattern);
                     logger.debug("Added exclude method pattern: {}", pattern);
-                    i++;
                     break;
                 case "--include-field":
                     filter.includeField(pattern);
                     logger.debug("Added include field pattern: {}", pattern);
-                    i++;
                     break;
                 case "--exclude-field":
                     filter.excludeField(pattern);
                     logger.debug("Added exclude field pattern: {}", pattern);
-                    i++;
                     break;
                 default:
                     logger.warn("Unknown filter option: {}", arg);
@@ -108,6 +153,19 @@ public class InstrumenterAgent {
         return filter; 
     } 
 
+
+    private static PatternBasedInstrumentationFilter defaultExclude() { 
+        return new PatternBasedInstrumentationFilter()
+            .excludeClass("java/.*") 
+            .excludeClass("javax/.*")
+            .excludeClass("sun/.*")
+            .excludeClass("com/sun/.*")
+            .excludeClass("com/instrumenter/.*")
+            .excludeClass("org/slf4j/.*")
+            .excludeClass("org/ow2/asm/.*")
+            .excludeClass("ch/qos/logback/.*")
+            .excludeClass("jdk/.*");
+    }
     private static InstrumentationFilter defaultRuntimeFilter() {
         return new PatternBasedInstrumentationFilter()
             .allClass()
@@ -149,20 +207,8 @@ public class InstrumenterAgent {
 
 
         public MethodTracingTransformer() {
-            // Default constructor
-            // instrument everything 
-            this.filter = new PatternBasedInstrumentationFilter()
-                                                        .allClass()
-                                                        .allMethod()
-                                                        .allField()
-                                                        .excludeClass("java/.*") 
-                                                        .excludeClass("javax/.*")
-                                                        .excludeClass("sun/.*")
-                                                        .excludeClass("com/sun/.*")
-                                                        .excludeClass("com/instrumenter/.*")
-                                                        .excludeClass("org/slf4j/.*")
-                                                        .excludeClass("org/ow2/asm/.*")
-                                                        .excludeClass("ch/qos/logback/.*");
+            // Default constructor with default filter
+            this.filter = new PatternBasedInstrumentationFilter() ; 
         }
         
 
@@ -181,7 +227,7 @@ public class InstrumenterAgent {
                 if (filter.shouldInstrumentClass(className)) {
                     logger.debug("Instrumenting class: {}", className);
                     return instrumenter.instrument(classfileBuffer, 
-                        (classWriter) -> new MethodTracerVisitor(classWriter, filter));
+                        (classWriter) -> new FileLoggingMethodTracerWithObjectSize(classWriter, filter));
                 }
             } catch (Exception ex) {
                 logger.error("Error instrumenting class: {}", className, ex);
