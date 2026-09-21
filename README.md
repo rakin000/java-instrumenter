@@ -33,6 +33,44 @@ java-instrumenter/
 └── gradle.properties                           # Gradle properties
 ```
 
+## Object Tracker Agent
+
+A second, independent Java agent (sources in `src/objecttracker`, packages `otrack.*`; it does not touch
+`com.instrumenter.*`). It tracks object allocation/liveness per class and can log per-object field values.
+
+```bash
+./gradlew objectTrackerJars        # also part of `./gradlew build`
+# -> build/libs/object-tracker-agent.jar + object-tracker-boot.jar (keep them in the same directory)
+
+java -javaagent:build/libs/object-tracker-agent.jar="classes=+a.B;fields=*;events=/tmp/ev.jsonl" MyApp
+java -cp build/libs/object-tracker-agent.jar otrack.agent.Attach <pid|name> classes=a.B   # attach to a running JVM
+```
+
+Options (`key=value` joined by `;`):
+
+| Option | Meaning |
+| --- | --- |
+| `cmd=start\|add\|stop\|report` | default `start` |
+| `classes=a.B,+c.D` | classes to track; `+` also tracks subclasses/implementors |
+| `classesFile=path` | one class per line, `#` comments |
+| `classesJson=path` | JSON object `{"a.B": "YES", "c.D": "NO"}`; only `YES` entries are instrumented |
+| `sample=N` | keep 1 in N objects (default 1) |
+| `stacks=true\|false`, `depth=N` | record allocation stacks (expensive) |
+| `interval=SECONDS` | statistics report period (default 10) |
+| `out=path` | statistics JSONL |
+| `fields=*\|a,b` | log field values: `new` / `set` / `free` events (first start only) |
+| `events=path` | event trace JSONL |
+| `logFile=path` | write the agent's own `[otrack]` messages to a file instead of stderr |
+
+`fields=` mode adds work to every write of a tracked field and drops events when its 64K queue is full
+(the count is in the final `end` event), so combine it with a narrow class list, named fields and/or `sample=N`.
+
+Design: the agent jar is a thin loader; the tracker runtime and ASM (relocated to `otrack.shaded.asm` by
+`tools/Shade.java`) live in `object-tracker-boot.jar`, which is appended to the bootstrap class path so
+instrumented classes from any class loader can call it and ASM cannot clash with the target's libraries.
+
+Demos: `examples/objecttracker/run-demo.sh` and `examples/objecttracker/run-json-log.sh`.
+
 ## Requirements
 
 - Java 11 or higher

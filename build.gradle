@@ -85,3 +85,84 @@ test {
 }
 
 build.dependsOn javaAgentJar, instrumenterJar
+
+// ---------------------------------------------------------------------------------------------
+// Object tracker agent (sources under src/objecttracker, separate from com.instrumenter.*)
+//
+// Built as two jars that must sit next to each other:
+//   object-tracker-agent.jar  thin agent (Premain/Agent-Class), no dependencies
+//   object-tracker-boot.jar   tracker runtime + ASM relocated to otrack.shaded.asm, appended to the
+//                             bootstrap class path so instrumented classes of any loader can call it
+// Usage: java -javaagent:build/libs/object-tracker-agent.jar="classes=+a.B;fields=*" ...
+// ---------------------------------------------------------------------------------------------
+sourceSets {
+    otrackBoot {
+        java.srcDir 'src/objecttracker/boot'
+    }
+    otrackAgent {
+        java.srcDir 'src/objecttracker/agent'
+    }
+    otrackTools {
+        java.srcDir 'tools'
+    }
+}
+
+dependencies {
+    otrackBootImplementation 'org.ow2.asm:asm:9.7'
+    otrackBootImplementation 'org.ow2.asm:asm-commons:9.7'
+    otrackBootImplementation 'org.ow2.asm:asm-tree:9.7'
+    otrackToolsImplementation 'org.ow2.asm:asm:9.7'
+    otrackToolsImplementation 'org.ow2.asm:asm-commons:9.7'
+}
+
+tasks.named('compileOtrackBootJava') { options.release = 21 }
+tasks.named('compileOtrackAgentJava') { options.release = 21 }
+tasks.named('compileOtrackToolsJava') { options.release = 21 }
+
+def otrackShadedDir = layout.buildDirectory.dir('otrack-shaded')
+
+// Rewrites org.objectweb.asm -> otrack.shaded.asm across the tracker classes and the ASM jars
+task shadeOtrackBoot(type: JavaExec) {
+    dependsOn 'compileOtrackBootJava', 'compileOtrackToolsJava'
+    classpath = sourceSets.otrackTools.output + sourceSets.otrackTools.runtimeClasspath
+    mainClass = 'Shade'
+    notCompatibleWithConfigurationCache('args are computed at execution time from the source set classpaths')
+    inputs.files sourceSets.otrackBoot.output, sourceSets.otrackBoot.runtimeClasspath
+    outputs.dir otrackShadedDir
+    doFirst {
+        delete otrackShadedDir
+        args = [otrackShadedDir.get().asFile.path] +
+                sourceSets.otrackBoot.output.classesDirs.files.collect { it.path } +
+                sourceSets.otrackBoot.runtimeClasspath.files.findAll { it.name.endsWith('.jar') }.collect { it.path }
+    }
+}
+
+task otrackBootJar(type: Jar) {
+    dependsOn shadeOtrackBoot
+    archiveFileName = 'object-tracker-boot.jar'
+    from otrackShadedDir
+}
+
+task otrackAgentJar(type: Jar) {
+    dependsOn 'compileOtrackAgentJava'
+    archiveFileName = 'object-tracker-agent.jar'
+    from sourceSets.otrackAgent.output
+    manifest {
+        attributes(
+            'Premain-Class': 'otrack.agent.Agent',
+            'Agent-Class': 'otrack.agent.Agent',
+            'Can-Redefine-Classes': 'true',
+            'Can-Retransform-Classes': 'true',
+            'Implementation-Title': 'Object Tracker',
+            'Implementation-Version': version
+        )
+    }
+}
+
+task objectTrackerJars {
+    group = 'build'
+    description = 'Builds object-tracker-agent.jar and object-tracker-boot.jar into build/libs'
+    dependsOn otrackAgentJar, otrackBootJar
+}
+
+build.dependsOn objectTrackerJars
