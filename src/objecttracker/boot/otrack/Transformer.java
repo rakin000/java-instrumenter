@@ -30,6 +30,8 @@ import org.objectweb.asm.Type;
 final class Transformer implements ClassFileTransformer {
     private final Set<String> exact = ConcurrentHashMap.newKeySet();    // internal names
     private final Set<String> subtypes = ConcurrentHashMap.newKeySet(); // internal names, incl. their subtypes
+    private final Set<String> simple = ConcurrentHashMap.newKeySet();         // package-less names, match in any package
+    private final Set<String> simpleSubtypes = ConcurrentHashMap.newKeySet(); // same, incl. subtypes
     private final Map<String, Boolean> headerCache = new ConcurrentHashMap<>();
     final Set<String> instrumented = ConcurrentHashMap.newKeySet();
     private volatile boolean active = true;
@@ -45,25 +47,47 @@ final class Transformer implements ClassFileTransformer {
         String n = dotted.replace('.', '/');
         exact.add(n);
         if (withSubtypes) subtypes.add(n);
+        if (n.indexOf('/') < 0) { // no package given: also resolve against any package at load time
+            simple.add(n);
+            if (withSubtypes) simpleSubtypes.add(n);
+        }
         headerCache.clear();
+    }
+
+    /**
+     * True if the class part of {@code internal} equals an entry of {@code names}, either whole
+     * ({@code Outer$Inner}) or as the innermost nested name ({@code Inner}). JDK types never match.
+     */
+    private static boolean simpleHit(Set<String> names, String internal) {
+        if (names.isEmpty()) return false;
+        if (internal.startsWith("java/") || internal.startsWith("javax/") || internal.startsWith("jdk/")
+                || internal.startsWith("sun/") || internal.startsWith("com/sun/")) return false;
+        String s = internal.substring(internal.lastIndexOf('/') + 1);
+        if (names.contains(s)) return true;
+        int d = s.lastIndexOf('$');
+        return d >= 0 && d + 1 < s.length() && names.contains(s.substring(d + 1));
     }
 
     void deactivate() {
         active = false;
         exact.clear();
         subtypes.clear();
+        simple.clear();
+        simpleSubtypes.clear();
         headerCache.clear();
     }
 
     /** Match for an already loaded class, using reflection (no bytes needed). */
     boolean matches(Class<?> c) {
-        if (exact.contains(c.getName().replace('.', '/'))) return true;
-        return !subtypes.isEmpty() && inHierarchy(c, 0);
+        String n = c.getName().replace('.', '/');
+        if (exact.contains(n) || simpleHit(simple, n)) return true;
+        return (!subtypes.isEmpty() || !simpleSubtypes.isEmpty()) && inHierarchy(c, 0);
     }
 
     private boolean inHierarchy(Class<?> c, int depth) {
         if (c == null || depth > 64) return false;
-        if (subtypes.contains(c.getName().replace('.', '/'))) return true;
+        String n = c.getName().replace('.', '/');
+        if (subtypes.contains(n) || simpleHit(simpleSubtypes, n)) return true;
         if (inHierarchy(c.getSuperclass(), depth + 1)) return true;
         for (Class<?> i : c.getInterfaces()) if (inHierarchy(i, depth + 1)) return true;
         return false;
@@ -74,10 +98,12 @@ final class Transformer implements ClassFileTransformer {
         if (!active || name == null || loader == null || name.startsWith("otrack/")) return null;
         try {
             boolean match = redefined != null ? matches(redefined)
-                    : exact.contains(name) || (!subtypes.isEmpty() && headerMatches(loader, new ClassReader(bytes)));
+                    : exact.contains(name) || simpleHit(simple, name)
+                            || ((!subtypes.isEmpty() || !simpleSubtypes.isEmpty()) && headerMatches(loader, new ClassReader(bytes)));
             if (!match) return null;
             byte[] out = instrument(name, bytes);
-            if (out != null) instrumented.add(name);
+            if (out != null && instrumented.add(name) && !exact.contains(name) && simpleHit(simple, name))
+                Controller.log("package-less name resolved to " + name.replace('/', '.'));
             return out;
         } catch (Throwable t) {
             Controller.log("cannot instrument " + name + ": " + t);
@@ -94,7 +120,7 @@ final class Transformer implements ClassFileTransformer {
     /** Walks supertypes by reading .class resources, never loading classes. JDK types are not traversed. */
     private boolean superMatches(ClassLoader loader, String n, int depth) {
         if (n == null || depth > 64) return false;
-        if (subtypes.contains(n)) return true;
+        if (subtypes.contains(n) || simpleHit(simpleSubtypes, n)) return true;
         if (n.startsWith("java/") || n.startsWith("javax/") || n.startsWith("jdk/") || n.startsWith("sun/")) return false;
         Boolean cached = headerCache.get(n);
         if (cached != null) return cached;

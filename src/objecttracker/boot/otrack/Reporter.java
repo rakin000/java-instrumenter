@@ -1,5 +1,6 @@
 package otrack;
 
+import java.io.BufferedWriter;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -16,10 +17,18 @@ final class Reporter implements Runnable {
     private final long intervalMs;
     private volatile boolean running = true;
     private final Thread thread = new Thread(this, "otrack-reporter");
+    private BufferedWriter w; // opened once at construction, like Events.java, so later writes from this
+                               // daemon thread aren't subject to a fresh (and possibly denied) permission check
 
     Reporter(Path out, long intervalMs) {
         this.out = out;
         this.intervalMs = intervalMs;
+        try {
+            w = Files.newBufferedWriter(out, StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+        } catch (IOException e) {
+            Controller.log("cannot open " + out + ": " + e);
+            w = null;
+        }
         thread.setDaemon(true);
     }
 
@@ -36,6 +45,12 @@ final class Reporter implements Runnable {
             Thread.currentThread().interrupt();
         }
         write("final");
+        if (w != null) {
+            try {
+                w.close();
+            } catch (IOException ignored) {
+            }
+        }
     }
 
     @Override
@@ -52,17 +67,27 @@ final class Reporter implements Runnable {
                 return;
             }
             if (System.nanoTime() - next >= 0) {
-                write("interval");
+                // Never let one bad tick (sweep or write) kill this thread for the rest of the run: it is
+                // the only thing driving both periodic catch-up retransformation and stats reporting.
+                try {
+                    int caught = Controller.sweepMissed();
+                    if (caught > 0) Controller.log("sweep instrumented " + caught + " previously-missed loaded classes");
+                    write("interval");
+                } catch (Throwable t) {
+                    Controller.log("interval tick failed: " + t);
+                }
                 next += intervalMs * 1_000_000L;
             }
         }
     }
 
     synchronized void write(String reason) {
+        if (w == null) return; // open already failed and was logged; do not retry every tick
         try {
-            Files.writeString(out, snapshot(reason) + "\n", StandardCharsets.UTF_8,
-                    StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-        } catch (IOException e) {
+            w.write(snapshot(reason));
+            w.write('\n');
+            w.flush();
+        } catch (Throwable e) {
             Controller.log("cannot write " + out + ": " + e);
         }
     }

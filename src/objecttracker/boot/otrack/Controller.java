@@ -1,12 +1,13 @@
 package otrack;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.StandardOpenOption;
-import java.time.Instant;
+import java.io.Writer;
 import java.lang.instrument.Instrumentation;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -22,6 +23,7 @@ import java.util.Set;
  *   classesFile=path            one class per line, '#' comments
  *   classesJson=path            JSON object {"a.B": "YES", "+c.D": "NO", ...}; only YES entries are instrumented
  *                               ('+' prefix as in classes=). Combined with classes=/classesFile=
+ *   (names without a package, e.g. "Foo", match Foo in any non-JDK package, and Outer$Foo as "Foo")
  *   sample=N                    keep 1 in N objects for liveness tracking (default 1 = all)
  *   stacks=true|false           record allocation stacks of sampled objects (default false)
  *   depth=N                     stack frames to keep (default 8)
@@ -38,13 +40,23 @@ public final class Controller {
     private static Transformer transformer;
     private static Reporter reporter;
     private static Instrumentation inst;
-    private static volatile Path logFile;
+    private static volatile Writer logWriter;
 
     private Controller() {}
 
     public static synchronized void command(String rawArgs, Instrumentation i) {
         Map<String, String> a = parse(rawArgs);
-        if (a.containsKey("logFile")) logFile = Path.of(a.get("logFile"));
+        // Opened once, up front, and kept open for the run: like Events.java, this dodges hosts (e.g.
+        // Elasticsearch's entitlements) that grant file access at open time to whatever thread/context is
+        // live during agent start-up but deny a fresh permission check made later from a background thread.
+        if (a.containsKey("logFile") && logWriter == null) {
+            try {
+                logWriter = Files.newBufferedWriter(Path.of(a.get("logFile")), StandardCharsets.UTF_8,
+                        StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+            } catch (Throwable e) {
+                System.err.println("[otrack] cannot open log file " + a.get("logFile") + ": " + e);
+            }
+        }
         String cmd = a.getOrDefault("cmd", "start");
         try {
             switch (cmd) {
@@ -133,6 +145,18 @@ public final class Controller {
         log("stopped, reverted " + reverted + " classes");
     }
 
+    /**
+     * Re-scans all currently loaded classes and retransforms any target that {@link Transformer#transform}
+     * never got a chance to instrument on its own class-load callback (e.g. classes defined into a plugin's
+     * own {@code ModuleLayer}/classloader after start-up, which for some plugin loading paths do not appear
+     * to reliably trigger the JVM's live class-file-load hook the way ordinary classloaders do). Called
+     * periodically by {@link Reporter} so such classes are caught within one report interval of loading,
+     * instead of only once at agent start (when nothing is loaded yet). Safe to call after {@link #stop}.
+     */
+    static synchronized int sweepMissed() {
+        return transformer == null ? 0 : retransform(true);
+    }
+
     /** Retransforms loaded classes that match but are not yet instrumented. */
     private static int retransform(boolean onlyNew) {
         int n = 0;
@@ -192,7 +216,7 @@ public final class Controller {
         }
         log("classesJson: " + yes.size() + " YES of " + m.size() + " entries in " + file);
         return yes;
-    }
+    } 
 
     private static Map<String, String> parse(String s) {
         Map<String, String> m = new HashMap<>();
@@ -206,14 +230,23 @@ public final class Controller {
     }
 
     static void log(String msg) {
-        Path f = logFile;
-        if (f != null) {
+        Writer w = logWriter;
+        if (w != null) {
             try {
-                Files.writeString(f, Instant.now() + " [otrack] " + msg + System.lineSeparator(), StandardCharsets.UTF_8,
-                        StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+                synchronized (Controller.class) {
+                    w.write(Instant.now() + " [otrack] " + msg + System.lineSeparator());
+                    w.flush();
+                }
                 return;
-            } catch (IOException e) {
-                System.err.println("[otrack] cannot write log file " + f + ": " + e);
+            } catch (Throwable e) {
+                // Catches more than IOException on purpose: under a SecurityManager (e.g. Elasticsearch's
+                // bootstrap entitlements), a write from a thread not covered by the host's own grants throws
+                // AccessControlException/SecurityException, not IOException. This method must never propagate
+                // an exception, since callers include the otrack-reporter daemon thread, whose sole job is the
+                // periodic instrumentation sweep in Controller.sweepMissed() -- letting a logging failure kill
+                // that thread silently disables all further catch-up retransformation for the rest of the run.
+                System.err.println("[otrack] cannot write log file: " + e);
+                logWriter = null; // stop retrying every call for the rest of the run; fall back to stderr
             }
         }
         System.err.println("[otrack] " + msg);
