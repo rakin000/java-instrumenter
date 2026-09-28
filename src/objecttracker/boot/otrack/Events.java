@@ -12,6 +12,8 @@ import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.LongAdder;
 
+import com.google.gson.JsonObject;
+
 /**
  * Per-object event trace (JSONL). Callers format a line and {@link #emit} it; one daemon thread writes.
  * The queue is bounded: when the writer cannot keep up, events are dropped and counted, never blocking
@@ -38,9 +40,12 @@ final class Events implements Runnable {
         dropped.reset();
         long uptimeMs = (System.nanoTime() - Tracker.T0) / 1_000_000L;
         // "t" in every event is microseconds since T0; epochMs below is the wall-clock time of T0.
-        e.w.write("{\"ev\":\"start\",\"epochMs\":" + (System.currentTimeMillis() - uptimeMs)
-                + ",\"pid\":" + ProcessHandle.current().pid()
-                + ",\"fields\":" + Reporter.str(fieldsDesc) + "}\n");
+        JsonObject start = new JsonObject();
+        start.addProperty("ev", "start");
+        start.addProperty("epochMs", System.currentTimeMillis() - uptimeMs);
+        start.addProperty("pid", ProcessHandle.current().pid());
+        start.addProperty("fields", fieldsDesc);
+        e.w.write(start + "\n");
         e.w.flush();
         cur = e;
         e.thread.start();
@@ -91,7 +96,7 @@ final class Events implements Runnable {
             write(batch);
             w.write("{\"ev\":\"end\",\"dropped\":" + dropped.sum() + "}\n");
         } catch (IOException e) {
-            Controller.log("cannot write events: " + e);
+            Log.log("cannot write events: " + e);
         } finally {
             try {
                 w.close();

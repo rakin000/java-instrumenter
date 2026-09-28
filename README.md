@@ -42,9 +42,10 @@ Options (`key=value` joined by `;`):
 `fields=` mode adds work to every write of a tracked field and drops events when its 64K queue is full
 (the count is in the final `end` event), so combine it with a narrow class list, named fields and/or `sample=N`.
 
-Design: the agent jar is a thin loader; the tracker runtime and ASM (relocated to `otrack.shaded.asm` by
+Design: the agent jar is a thin loader; the tracker runtime, ASM and Gson (relocated under `otrack.shaded` by
 `tools/Shade.java`) live in `object-tracker-boot.jar`, which is appended to the bootstrap class path so
-instrumented classes from any class loader can call it and ASM cannot clash with the target's libraries.
+instrumented classes from any class loader can call it and the bundled libraries cannot clash with the target's.
+See [OTRACK.md](OTRACK.md) for how the agent loads.
 
 Demos: `examples/objecttracker/run-demo.sh` and `examples/objecttracker/run-json-log.sh`.
 

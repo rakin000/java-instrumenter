@@ -1,6 +1,5 @@
 package otrack;
 
-import java.io.InputStream;
 import java.lang.instrument.ClassFileTransformer;
 import java.security.ProtectionDomain;
 import java.util.HashMap;
@@ -28,12 +27,8 @@ import org.objectweb.asm.Type;
  * own code. Fields of non-instrumented superclasses, and writes made by other classes, are not seen.
  */
 final class Transformer implements ClassFileTransformer {
-    private final Set<String> exact = ConcurrentHashMap.newKeySet();    // internal names
-    private final Set<String> subtypes = ConcurrentHashMap.newKeySet(); // internal names, incl. their subtypes
-    private final Set<String> simple = ConcurrentHashMap.newKeySet();         // package-less names, match in any package
-    private final Set<String> simpleSubtypes = ConcurrentHashMap.newKeySet(); // same, incl. subtypes
-    private final Map<String, Boolean> headerCache = new ConcurrentHashMap<>();
-    final Set<String> instrumented = ConcurrentHashMap.newKeySet();
+    private final TargetMatcher matcher = new TargetMatcher();
+    private final Set<String> instrumented = ConcurrentHashMap.newKeySet(); // internal names
     private volatile boolean active = true;
     private final boolean fieldsOn;
     private final Set<String> fieldNames; // null = every instance field
@@ -43,94 +38,43 @@ final class Transformer implements ClassFileTransformer {
         this.fieldNames = fieldNames;
     }
 
-    void addTarget(String dotted, boolean withSubtypes) {
-        String n = dotted.replace('.', '/');
-        exact.add(n);
-        if (withSubtypes) subtypes.add(n);
-        if (n.indexOf('/') < 0) { // no package given: also resolve against any package at load time
-            simple.add(n);
-            if (withSubtypes) simpleSubtypes.add(n);
-        }
-        headerCache.clear();
+    void addTarget(Target t) {
+        matcher.add(t);
     }
 
-    /**
-     * True if the class part of {@code internal} equals an entry of {@code names}, either whole
-     * ({@code Outer$Inner}) or as the innermost nested name ({@code Inner}). JDK types never match.
-     */
-    private static boolean simpleHit(Set<String> names, String internal) {
-        if (names.isEmpty()) return false;
-        if (internal.startsWith("java/") || internal.startsWith("javax/") || internal.startsWith("jdk/")
-                || internal.startsWith("sun/") || internal.startsWith("com/sun/")) return false;
-        String s = internal.substring(internal.lastIndexOf('/') + 1);
-        if (names.contains(s)) return true;
-        int d = s.lastIndexOf('$');
-        return d >= 0 && d + 1 < s.length() && names.contains(s.substring(d + 1));
-    }
-
+    /** From now on transform() returns null, so retransforming a class restores its original bytes. */
     void deactivate() {
         active = false;
-        exact.clear();
-        subtypes.clear();
-        simple.clear();
-        simpleSubtypes.clear();
-        headerCache.clear();
+        matcher.clear();
     }
 
-    /** Match for an already loaded class, using reflection (no bytes needed). */
     boolean matches(Class<?> c) {
-        String n = c.getName().replace('.', '/');
-        if (exact.contains(n) || simpleHit(simple, n)) return true;
-        return (!subtypes.isEmpty() || !simpleSubtypes.isEmpty()) && inHierarchy(c, 0);
+        return matcher.matches(c);
     }
 
-    private boolean inHierarchy(Class<?> c, int depth) {
-        if (c == null || depth > 64) return false;
-        String n = c.getName().replace('.', '/');
-        if (subtypes.contains(n) || simpleHit(simpleSubtypes, n)) return true;
-        if (inHierarchy(c.getSuperclass(), depth + 1)) return true;
-        for (Class<?> i : c.getInterfaces()) if (inHierarchy(i, depth + 1)) return true;
-        return false;
+    boolean isInstrumented(Class<?> c) {
+        return instrumented.contains(c.getName().replace('.', '/'));
+    }
+
+    /** Internal names of every class instrumented so far. */
+    Set<String> instrumentedNames() {
+        return Set.copyOf(instrumented);
     }
 
     @Override
     public byte[] transform(ClassLoader loader, String name, Class<?> redefined, ProtectionDomain pd, byte[] bytes) {
         if (!active || name == null || loader == null || name.startsWith("otrack/")) return null;
         try {
-            boolean match = redefined != null ? matches(redefined)
-                    : exact.contains(name) || simpleHit(simple, name)
-                            || ((!subtypes.isEmpty() || !simpleSubtypes.isEmpty()) && headerMatches(loader, new ClassReader(bytes)));
+            boolean match = redefined != null ? matcher.matches(redefined) : matcher.matches(loader, name, bytes);
             if (!match) return null;
             byte[] out = instrument(name, bytes);
-            if (out != null && instrumented.add(name) && !exact.contains(name) && simpleHit(simple, name))
-                Controller.log("package-less name resolved to " + name.replace('/', '.'));
+            if (out != null && instrumented.add(name) && matcher.matchedByPackageLessName(name))
+                Log.log("package-less name resolved to " + name.replace('/', '.'));
             return out;
         } catch (Throwable t) {
-            Controller.log("cannot instrument " + name + ": " + t);
+            Log.log("cannot instrument " + name + ": " + t);
             return null; // never break class loading
         }
-    }
-
-    private boolean headerMatches(ClassLoader loader, ClassReader cr) {
-        if (superMatches(loader, cr.getSuperName(), 0)) return true;
-        for (String i : cr.getInterfaces()) if (superMatches(loader, i, 0)) return true;
-        return false;
-    }
-
-    /** Walks supertypes by reading .class resources, never loading classes. JDK types are not traversed. */
-    private boolean superMatches(ClassLoader loader, String n, int depth) {
-        if (n == null || depth > 64) return false;
-        if (subtypes.contains(n) || simpleHit(simpleSubtypes, n)) return true;
-        if (n.startsWith("java/") || n.startsWith("javax/") || n.startsWith("jdk/") || n.startsWith("sun/")) return false;
-        Boolean cached = headerCache.get(n);
-        if (cached != null) return cached;
-        boolean r = false;
-        try (InputStream in = loader.getResourceAsStream(n + ".class")) {
-            if (in != null) r = headerMatches(loader, new ClassReader(in));
-        } catch (Throwable ignored) {
-        }
-        headerCache.put(n, r);
-        return r;
     }
 
     private byte[] instrument(String name, byte[] bytes) {
@@ -139,7 +83,7 @@ final class Transformer implements ClassFileTransformer {
         if (cr.readShort(6) < 49) return null; // ldc <class> needs class file version 49+
         int id = Tracker.register(name.replace('/', '.'));
         if (id < 0) {
-            Controller.log("too many tracked classes, skipping " + name);
+            Log.log("too many tracked classes, skipping " + name);
             return null;
         }
         Map<String, String> fields = new LinkedHashMap<>(); // tracked instance fields: name -> descriptor

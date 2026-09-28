@@ -5,11 +5,17 @@ import java.util.jar.*;
 import org.objectweb.asm.*;
 import org.objectweb.asm.commons.*;
 
-/** Build-time only: Shade OUT_DIR IN... (dirs or jars); rewrites org.objectweb.asm -> otrack.shaded.asm. */
+/** Build-time only: Shade OUT_DIR IN... (dirs or jars); relocates the bundled libraries under otrack.shaded. */
 public class Shade {
+    static final Map<String, String> RELOCATIONS = Map.of(
+            "org/objectweb/asm/", "otrack/shaded/asm/",
+            "com/google/gson/", "otrack/shaded/gson/");
+
     static final Remapper R = new Remapper() {
         @Override public String map(String n) {
-            return n.startsWith("org/objectweb/asm/") ? "otrack/shaded/asm/" + n.substring(18) : n;
+            for (Map.Entry<String, String> e : RELOCATIONS.entrySet())
+                if (n.startsWith(e.getKey())) return e.getValue() + n.substring(e.getKey().length());
+            return n;
         }
     };
 

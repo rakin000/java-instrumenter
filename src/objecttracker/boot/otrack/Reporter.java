@@ -2,6 +2,7 @@ package otrack;
 
 import java.io.BufferedWriter;
 import java.io.IOException;
+import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -10,6 +11,8 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+
+import com.google.gson.stream.JsonWriter;
 
 /** One daemon thread: drains the GC reference queue and appends a JSON line per interval. */
 final class Reporter implements Runnable {
@@ -26,7 +29,7 @@ final class Reporter implements Runnable {
         try {
             w = Files.newBufferedWriter(out, StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
         } catch (IOException e) {
-            Controller.log("cannot open " + out + ": " + e);
+            Log.log("cannot open " + out + ": " + e);
             w = null;
         }
         thread.setDaemon(true);
@@ -71,10 +74,10 @@ final class Reporter implements Runnable {
                 // the only thing driving both periodic catch-up retransformation and stats reporting.
                 try {
                     int caught = Controller.sweepMissed();
-                    if (caught > 0) Controller.log("sweep instrumented " + caught + " previously-missed loaded classes");
+                    if (caught > 0) Log.log("sweep instrumented " + caught + " previously-missed loaded classes");
                     write("interval");
                 } catch (Throwable t) {
-                    Controller.log("interval tick failed: " + t);
+                    Log.log("interval tick failed: " + t);
                 }
                 next += intervalMs * 1_000_000L;
             }
@@ -88,65 +91,55 @@ final class Reporter implements Runnable {
             w.write('\n');
             w.flush();
         } catch (Throwable e) {
-            Controller.log("cannot write " + out + ": " + e);
+            Log.log("cannot write " + out + ": " + e);
         }
     }
 
-    static String snapshot(String reason) {
+    static String snapshot(String reason) throws IOException {
         long nowRel = (System.nanoTime() - Tracker.T0) / 1_000_000L;
         List<Tracker.ClassStats> stats = new ArrayList<>(Tracker.snapshotStats());
         stats.sort(Comparator.comparingLong((Tracker.ClassStats s) -> s.live.sum()).reversed());
 
-        StringBuilder sb = new StringBuilder(1024);
-        sb.append("{\"ts\":\"").append(Instant.now()).append("\",\"reason\":\"").append(reason)
-          .append("\",\"uptimeMs\":").append(nowRel)
-          .append(",\"sample\":").append(Tracker.sample)
-          .append(",\"trackedRefs\":").append(Tracker.LIVE.size())
-          .append(",\"errors\":").append(Tracker.errors.sum())
-          .append(",\"eventsDropped\":").append(Events.dropped())
-          .append(",\"classes\":[");
-        boolean first = true;
-        for (Tracker.ClassStats s : stats) {
-            long live = Math.max(0, s.live.sum());
-            if (!first) sb.append(',');
-            first = false;
-            sb.append("{\"class\":").append(str(s.name))
-              .append(",\"allocated\":").append(s.allocated.sum())
-              .append(",\"freed\":").append(s.freed.sum())
-              .append(",\"live\":").append(live)
-              .append(",\"shallowBytes\":").append(s.shallowSize)
-              .append(",\"liveBytes\":").append(live * s.shallowSize)
-              .append(",\"meanAgeMs\":").append(live == 0 ? 0 : nowRel - s.birthSumMs.sum() / live);
-            if (Tracker.stacks) {
-                List<Tracker.Site> sites = new ArrayList<>(s.sites.values());
-                sites.removeIf(x -> x.live.sum() <= 0);
-                sites.sort(Comparator.comparingLong((Tracker.Site x) -> x.live.sum()).reversed());
-                sb.append(",\"sites\":[");
-                for (int i = 0; i < Math.min(10, sites.size()); i++) {
-                    if (i > 0) sb.append(',');
-                    Tracker.Site x = sites.get(i);
-                    sb.append("{\"live\":").append(x.live.sum()).append(",\"stack\":[");
-                    for (int j = 0; j < x.frames.length; j++) {
-                        if (j > 0) sb.append(',');
-                        sb.append(str(x.frames[j]));
-                    }
-                    sb.append("]}");
-                }
-                sb.append(']');
+        StringWriter out = new StringWriter(1024);
+        try (JsonWriter w = new JsonWriter(out)) {
+            w.beginObject()
+             .name("ts").value(Instant.now().toString())
+             .name("reason").value(reason)
+             .name("uptimeMs").value(nowRel)
+             .name("sample").value(Tracker.sample)
+             .name("trackedRefs").value(Tracker.LIVE.size())
+             .name("errors").value(Tracker.errors.sum())
+             .name("eventsDropped").value(Events.dropped())
+             .name("classes").beginArray();
+            for (Tracker.ClassStats s : stats) {
+                long live = Math.max(0, s.live.sum());
+                w.beginObject()
+                 .name("class").value(s.name)
+                 .name("allocated").value(s.allocated.sum())
+                 .name("freed").value(s.freed.sum())
+                 .name("live").value(live)
+                 .name("shallowBytes").value(s.shallowSize)
+                 .name("liveBytes").value(live * s.shallowSize)
+                 .name("meanAgeMs").value(live == 0 ? 0 : nowRel - s.birthSumMs.sum() / live);
+                if (Tracker.stacks) writeSites(w, s);
+                w.endObject();
             }
-            sb.append('}');
+            w.endArray().endObject();
         }
-        return sb.append("]}").toString();
+        return out.toString();
     }
 
-    static String str(String s) {
-        StringBuilder b = new StringBuilder(s.length() + 2).append('"');
-        for (int i = 0; i < s.length(); i++) {
-            char c = s.charAt(i);
-            if (c == '"' || c == '\\') b.append('\\').append(c);
-            else if (c < 0x20) b.append(String.format("\\u%04x", (int) c));
-            else b.append(c);
+    /** The 10 allocation sites with the most live objects. */
+    private static void writeSites(JsonWriter w, Tracker.ClassStats s) throws IOException {
+        List<Tracker.Site> sites = new ArrayList<>(s.sites.values());
+        sites.removeIf(x -> x.live.sum() <= 0);
+        sites.sort(Comparator.comparingLong((Tracker.Site x) -> x.live.sum()).reversed());
+        w.name("sites").beginArray();
+        for (Tracker.Site x : sites.subList(0, Math.min(10, sites.size()))) {
+            w.beginObject().name("live").value(x.live.sum()).name("stack").beginArray();
+            for (String frame : x.frames) w.value(frame);
+            w.endArray().endObject();
         }
-        return b.append('"').toString();
+        w.endArray();
     }
 }

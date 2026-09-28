@@ -12,9 +12,11 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.LongAdder;
 
+import com.google.gson.JsonPrimitive;
+
 /**
  * Runtime state and hot path. Lives on the bootstrap class path so that instrumented classes from
- * any class loader link to the same copy. Only JDK types are used here.
+ * any class loader link to the same copy. Only JDK types and the relocated Gson from the same jar are used here.
  *
  * Per tracked object cost: one getClass() compare + one LongAdder increment; sampled objects
  * additionally cost one WeakReference and (optionally) one stack walk.
@@ -156,7 +158,7 @@ public final class Tracker {
                     p.r = r;
                     p.sb.setLength(0);
                 } else {
-                    Events.emit(head("new", r).append(",\"th\":").append(Reporter.str(Thread.currentThread().getName()))
+                    Events.emit(head("new", r).append(",\"th\":").append(quote(Thread.currentThread().getName()))
                             .append(at()).append('}').toString());
                 }
             }
@@ -210,7 +212,7 @@ public final class Tracker {
 
     private static void init(String name, String json) {
         StringBuilder sb = PENDING.get().sb;
-        sb.append(Reporter.str(name)).append(':').append(json).append(',');
+        sb.append(quote(name)).append(':').append(json).append(',');
     }
 
     public static void onInitDone(Object o) {
@@ -220,7 +222,7 @@ public final class Tracker {
             Ref r = p.r;
             p.o = null;
             p.r = null;
-            StringBuilder b = head("new", r).append(",\"th\":").append(Reporter.str(Thread.currentThread().getName()))
+            StringBuilder b = head("new", r).append(",\"th\":").append(quote(Thread.currentThread().getName()))
                     .append(at()).append(",\"f\":{");
             if (p.sb.length() > 0) b.append(p.sb, 0, p.sb.length() - 1);
             Events.emit(b.append("}}").toString());
@@ -235,8 +237,8 @@ public final class Tracker {
 
     private static void set(Ref r, String name, String json) {
         try {
-            Events.emit(head("set", r).append(",\"th\":").append(Reporter.str(Thread.currentThread().getName()))
-                    .append(",\"field\":").append(Reporter.str(name)).append(",\"v\":").append(json)
+            Events.emit(head("set", r).append(",\"th\":").append(quote(Thread.currentThread().getName()))
+                    .append(",\"field\":").append(quote(name)).append(",\"v\":").append(json)
                     .append(at()).append('}').toString());
         } catch (Throwable t) {
             errors.increment();
@@ -244,7 +246,7 @@ public final class Tracker {
     }
 
     public static void onInit(Object o, boolean v, String n) { if (initing(o)) init(n, String.valueOf(v)); }
-    public static void onInit(Object o, char v, String n) { if (initing(o)) init(n, Reporter.str(String.valueOf(v))); }
+    public static void onInit(Object o, char v, String n) { if (initing(o)) init(n, quote(String.valueOf(v))); }
     public static void onInit(Object o, int v, String n) { if (initing(o)) init(n, String.valueOf(v)); }
     public static void onInit(Object o, long v, String n) { if (initing(o)) init(n, String.valueOf(v)); }
     public static void onInit(Object o, float v, String n) { if (initing(o)) init(n, num(v)); }
@@ -252,7 +254,7 @@ public final class Tracker {
     public static void onInit(Object o, Object v, String n) { if (initing(o)) init(n, val(v)); }
 
     public static void onSet(Object o, boolean v, String n) { Ref r = setRef(o); if (r != null) set(r, n, String.valueOf(v)); }
-    public static void onSet(Object o, char v, String n) { Ref r = setRef(o); if (r != null) set(r, n, Reporter.str(String.valueOf(v))); }
+    public static void onSet(Object o, char v, String n) { Ref r = setRef(o); if (r != null) set(r, n, quote(String.valueOf(v))); }
     public static void onSet(Object o, int v, String n) { Ref r = setRef(o); if (r != null) set(r, n, String.valueOf(v)); }
     public static void onSet(Object o, long v, String n) { Ref r = setRef(o); if (r != null) set(r, n, String.valueOf(v)); }
     public static void onSet(Object o, float v, String n) { Ref r = setRef(o); if (r != null) set(r, n, num(v)); }
@@ -262,30 +264,34 @@ public final class Tracker {
     private static StringBuilder head(String ev, Ref r) {
         return new StringBuilder(160).append("{\"t\":").append((System.nanoTime() - T0) / 1000L)
                 .append(",\"ev\":\"").append(ev).append("\",\"id\":").append(r.id)
-                .append(",\"class\":").append(Reporter.str(r.stats.name));
+                .append(",\"class\":").append(quote(r.stats.name));
+    }
+
+    private static String quote(String s) {
+        return new JsonPrimitive(s).toString();
     }
 
     private static String num(double d) {
-        return Double.isFinite(d) ? Double.toString(d) : Reporter.str(Double.toString(d));
+        return Double.isFinite(d) ? Double.toString(d) : quote(Double.toString(d));
     }
 
     private static String num(float f) {
-        return Float.isFinite(f) ? Float.toString(f) : Reporter.str(Float.toString(f));
+        return Float.isFinite(f) ? Float.toString(f) : quote(Float.toString(f));
     }
 
     /** JSON for an object-typed value. Never calls toString()/hashCode() of application objects. */
     private static String val(Object v) {
         if (v == null) return "null";
-        if (v instanceof String s) return Reporter.str(s.length() > MAX_STR ? s.substring(0, MAX_STR) + "..." : s);
+        if (v instanceof String s) return quote(s.length() > MAX_STR ? s.substring(0, MAX_STR) + "..." : s);
         if (v instanceof Boolean || v instanceof Integer || v instanceof Long || v instanceof Short || v instanceof Byte)
             return v.toString();
         if (v instanceof Double d) return num(d.doubleValue());
         if (v instanceof Float f) return num(f.floatValue());
-        if (v instanceof Character c) return Reporter.str(c.toString());
-        if (v instanceof Enum<?> e) return Reporter.str(e.name());
-        if (v instanceof Class<?> c) return Reporter.str(c.getName());
+        if (v instanceof Character c) return quote(c.toString());
+        if (v instanceof Enum<?> e) return quote(e.name());
+        if (v instanceof Class<?> c) return quote(c.getName());
         Ref t = find(v);
-        return "{\"class\":" + Reporter.str(v.getClass().getName()) + (t != null ? ",\"id\":" + t.id : "") + "}";
+        return "{\"class\":" + quote(v.getClass().getName()) + (t != null ? ",\"id\":" + t.id : "") + "}";
     }
 
     /** ,"at":[...] with the caller's frames when stacks=true, else "". */
@@ -300,7 +306,7 @@ public final class Tracker {
         StringBuilder b = new StringBuilder(",\"at\":[");
         for (int i = 0; i < fr.size(); i++) {
             if (i > 0) b.append(',');
-            b.append(Reporter.str(fr.get(i)));
+            b.append(quote(fr.get(i)));
         }
         return b.append(']').toString();
     }

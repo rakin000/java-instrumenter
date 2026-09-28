@@ -94,7 +94,7 @@ build.dependsOn javaAgentJar, instrumenterJar
 //
 // Built as two jars that must sit next to each other:
 //   object-tracker-agent.jar  thin agent (Premain/Agent-Class), no dependencies
-//   object-tracker-boot.jar   tracker runtime + ASM relocated to otrack.shaded.asm, appended to the
+//   object-tracker-boot.jar   tracker runtime + ASM and Gson relocated under otrack.shaded, appended to the
 //                             bootstrap class path so instrumented classes of any loader can call it
 // Usage: java -javaagent:build/libs/object-tracker-agent.jar="classes=+a.B;fields=*" ...
 // ---------------------------------------------------------------------------------------------
@@ -114,6 +114,8 @@ dependencies {
     otrackBootImplementation 'org.ow2.asm:asm:9.7'
     otrackBootImplementation 'org.ow2.asm:asm-commons:9.7'
     otrackBootImplementation 'org.ow2.asm:asm-tree:9.7'
+    // error_prone_annotations are compile-time only; left out so they are not put on the bootstrap path
+    otrackBootImplementation('com.google.code.gson:gson:2.13.1') { exclude group: 'com.google.errorprone' }
     otrackToolsImplementation 'org.ow2.asm:asm:9.7'
     otrackToolsImplementation 'org.ow2.asm:asm-commons:9.7'
 }
@@ -124,7 +126,7 @@ tasks.named('compileOtrackToolsJava') { options.release = 21 }
 
 def otrackShadedDir = layout.buildDirectory.dir('otrack-shaded')
 
-// Rewrites org.objectweb.asm -> otrack.shaded.asm across the tracker classes and the ASM jars
+// Relocates ASM and Gson under otrack.shaded across the tracker classes and the library jars (see tools/Shade.java)
 task shadeOtrackBoot(type: JavaExec) {
     dependsOn 'compileOtrackBootJava', 'compileOtrackToolsJava'
     classpath = sourceSets.otrackTools.output + sourceSets.otrackTools.runtimeClasspath
