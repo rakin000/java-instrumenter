@@ -124,7 +124,7 @@ m.invoke(null, args, inst);
 ### `invoke(null, args, inst)`
 
 - The first argument is `null` because `command` is static, so there is no instance.
-- `args` is the agent argument string, for example `"cmd=start;classes=+a.B;fields=*"`. `Controller.parse` splits
+- `args` is the agent argument string, for example `"cmd=start;classes=+a.B;fields=*"`. `Options.parse` splits
   it on `;` and `=`. See the `Controller` class javadoc for the full list of keys.
 - `inst` is the `Instrumentation` handle the JVM gave the agent. `Controller` stores it and uses it to register
   `Transformer` and to retransform classes that are already loaded. The agent manifest enables this with

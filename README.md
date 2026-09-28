@@ -32,14 +32,14 @@ Options (`key=value` joined by `;`):
 | `classesFile=path` | one class per line, `#` comments |
 | `classesJson=path` | JSON object `{"a.B": "YES", "c.D": "NO"}`; only `YES` entries are instrumented |
 | `sample=N` | keep 1 in N objects (default 1) |
-| `stacks=true\|false`, `depth=N` | record allocation stacks (expensive) |
+| `stacks=true\|false`, `depth=N` | record allocation stacks (expensive); `depth` also limits `set` event stacks (default 8) |
 | `interval=SECONDS` | statistics report period (default 10) |
 | `out=path` | statistics JSONL |
-| `fields=*\|a,b` | log field values: `new` / `set` / `free` events (first start only) |
+| `fields=*\|a,b` | log field values: `new` / `set` / `free` events (first start only); `set` events include the writer's call stack as `"at"` |
 | `events=path` | event trace JSONL |
 | `logFile=path` | write the agent's own `[otrack]` messages to a file instead of stderr |
 
-`fields=` mode adds work to every write of a tracked field and drops events when its 64K queue is full
+`fields=` mode adds work (including a stack walk) to every write of a tracked field and drops events when its 64K queue is full
 (the count is in the final `end` event), so combine it with a narrow class list, named fields and/or `sample=N`.
 
 Design: the agent jar is a thin loader; the tracker runtime, ASM and Gson (relocated under `otrack.shaded` by
@@ -48,6 +48,10 @@ instrumented classes from any class loader can call it and the bundled libraries
 See [OTRACK.md](OTRACK.md) for how the agent loads.
 
 Demos: `examples/objecttracker/run-demo.sh` and `examples/objecttracker/run-json-log.sh`.
+
+Tests: `./gradlew otrackTest` (also part of `./gradlew check`/`build`). Sources are in `src/objecttracker/test`:
+unit tests in `otrack`, plus end-to-end tests that run `fixture.Main` in a separate JVM under the built agent jars,
+both with `-javaagent` and by attaching.
 
 ## Requirements
 

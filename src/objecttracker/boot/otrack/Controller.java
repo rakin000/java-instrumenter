@@ -18,10 +18,11 @@ import java.util.Set;
  *   (names without a package, e.g. "Foo", match Foo in any non-JDK package, and Outer$Foo as "Foo")
  *   sample=N                    keep 1 in N objects for liveness tracking (default 1 = all)
  *   stacks=true|false           record allocation stacks of sampled objects (default false)
- *   depth=N                     stack frames to keep (default 8)
+ *   depth=N                     stack frames to keep, for stacks= and for set events (default 8)
  *   interval=SECONDS            report period (default 10)
  *   out=path                    JSONL statistics output (default $TMP/object-tracker-PID.jsonl)
- *   fields=*|a,b                track instance-field values: emit per-object new/set/free events
+ *   fields=*|a,b                track instance-field values: emit per-object new/set/free events; set events
+ *                               always carry the writer's call stack ("at")
  *                               (only honoured on the first start; classes must be loaded after or
  *                               retransformed by it)
  *   events=path                 JSONL event trace (default $TMP/object-tracker-PID-events.jsonl)

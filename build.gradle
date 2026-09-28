@@ -108,6 +108,15 @@ sourceSets {
     otrackTools {
         java.srcDir 'tools'
     }
+    otrackTest {
+        java.srcDir 'src/objecttracker/test'
+        compileClasspath += sourceSets.otrackBoot.output
+        runtimeClasspath += sourceSets.otrackBoot.output
+    }
+}
+
+configurations {
+    otrackTestImplementation.extendsFrom otrackBootImplementation
 }
 
 dependencies {
@@ -118,11 +127,16 @@ dependencies {
     otrackBootImplementation('com.google.code.gson:gson:2.13.1') { exclude group: 'com.google.errorprone' }
     otrackToolsImplementation 'org.ow2.asm:asm:9.7'
     otrackToolsImplementation 'org.ow2.asm:asm-commons:9.7'
+    otrackTestImplementation 'org.junit.jupiter:junit-jupiter-api:5.9.2'
+    otrackTestRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.9.2'
+    otrackTestRuntimeOnly 'org.junit.platform:junit-platform-launcher:1.9.2'
 }
 
 tasks.named('compileOtrackBootJava') { options.release = 21 }
 tasks.named('compileOtrackAgentJava') { options.release = 21 }
 tasks.named('compileOtrackToolsJava') { options.release = 21 }
+// 21, not the running JDK: the test fixtures get instrumented, and ASM 9.7 reads class files up to Java 23
+tasks.named('compileOtrackTestJava') { options.release = 21 }
 
 def otrackShadedDir = layout.buildDirectory.dir('otrack-shaded')
 
@@ -170,4 +184,15 @@ task objectTrackerJars {
     dependsOn otrackAgentJar, otrackBootJar
 }
 
+task otrackTest(type: Test) {
+    group = 'verification'
+    description = 'Runs the object tracker unit tests and the end-to-end tests against the built agent jars'
+    testClassesDirs = sourceSets.otrackTest.output.classesDirs
+    classpath = sourceSets.otrackTest.runtimeClasspath
+    useJUnitPlatform()
+    dependsOn objectTrackerJars
+    systemProperty 'otrack.agentJar', otrackAgentJar.archiveFile.get().asFile.absolutePath
+}
+
+check.dependsOn otrackTest
 build.dependsOn objectTrackerJars

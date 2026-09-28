@@ -239,7 +239,7 @@ public final class Tracker {
         try {
             Events.emit(head("set", r).append(",\"th\":").append(quote(Thread.currentThread().getName()))
                     .append(",\"field\":").append(quote(name)).append(",\"v\":").append(json)
-                    .append(at()).append('}').toString());
+                    .append(stack()).append('}').toString());
         } catch (Throwable t) {
             errors.increment();
         }
@@ -296,7 +296,11 @@ public final class Tracker {
 
     /** ,"at":[...] with the caller's frames when stacks=true, else "". */
     private static String at() {
-        if (!stacks) return "";
+        return stacks ? stack() : "";
+    }
+
+    /** ,"at":[...] with up to depth= frames of the caller, innermost first, skipping the tracker's own. */
+    private static String stack() {
         final int depth = stackDepth;
         List<String> fr = StackWalker.getInstance().walk(st -> st
                 .filter(f -> !f.getClassName().startsWith("otrack."))
