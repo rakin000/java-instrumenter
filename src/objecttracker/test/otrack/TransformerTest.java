@@ -40,6 +40,7 @@ class TransformerTest {
         Tracker.sample = 1;
         Tracker.stacks = false;
         Tracker.initHooks = false;
+        Tracker.dumpOnSet = false;
     }
 
     @AfterEach
@@ -47,6 +48,7 @@ class TransformerTest {
         Events.stop();
         Tracker.enabled = false;
         Tracker.initHooks = false;
+        Tracker.dumpOnSet = false;
     }
 
     @Test
@@ -112,6 +114,35 @@ class TransformerTest {
         JsonArray at = set.getAsJsonArray("at");
         assertTrue(at.get(0).getAsString().startsWith("fixture.Account.deposit:"), at.toString());
         for (JsonElement frame : at) assertFalse(frame.getAsString().startsWith("otrack."), at.toString());
+        assertFalse(set.has("all"), "the dump of all objects is off by default");
+    }
+
+    @Test
+    void dumpOnSetCarriesEveryLiveTrackedObject() throws Exception {
+        Path events = tmp.resolve("events.jsonl");
+        Events.start(events, "*");
+        Tracker.initHooks = true;
+        Tracker.dumpOnSet = true;
+        ClassLoader l = new InstrumentingLoader(transformer(true, "+fixture.Account"));
+
+        Object a = account(l, "alice", 10);
+        Object s = l.loadClass("fixture.Savings").getConstructor(String.class).newInstance("carol");
+        a.getClass().getMethod("deposit", long.class).invoke(a, 5L);
+        Events.stop();
+
+        JsonArray all = only(readJsonl(events), "set").getAsJsonArray("all");
+        assertEquals(2, all.size(), all.toString());
+        JsonObject alice = null, carol = null;
+        for (JsonElement e : all) {
+            JsonObject o = e.getAsJsonObject();
+            if (o.get("class").getAsString().equals("fixture.Account")) alice = o.getAsJsonObject("f");
+            else carol = o.getAsJsonObject("f");
+        }
+        assertEquals(15, alice.get("balance").getAsLong(), "the field being written shows its new value");
+        assertEquals("alice", alice.get("owner").getAsString());
+        assertEquals(Set.of("term", "balance", "owner"), carol.keySet(), "inherited fields are included");
+        assertEquals(10, carol.get("balance").getAsLong());
+        assertNotNull(s);
     }
 
     @Test

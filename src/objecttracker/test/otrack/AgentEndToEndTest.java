@@ -37,7 +37,7 @@ class AgentEndToEndTest {
     void premainTracksAllocationsAndFieldWrites() throws Exception {
         Path events = tmp.resolve("events.jsonl"), stats = tmp.resolve("stats.jsonl"), log = tmp.resolve("agent.log");
         Path console = tmp.resolve("console.txt");
-        Process p = java("-javaagent:" + AGENT_JAR + "=classes=+fixture.Account;fields=balance;interval=0.2"
+        Process p = java("-javaagent:" + AGENT_JAR + "=classes=+fixture.Account;fields=balance;interval=0.2;dumpOnSet=true"
                 + ";events=" + events + ";out=" + stats + ";logFile=" + log, "fixture.Main", "700")
                 .redirectOutput(console.toFile()).start();
         assertEquals(0, p.waitFor(), () -> read(console));
@@ -54,6 +54,11 @@ class AgentEndToEndTest {
         JsonArray at = set.getAsJsonArray("at");
         assertTrue(at.get(0).getAsString().startsWith("fixture.Account.deposit:"), at.toString());
         assertTrue(at.get(1).getAsString().startsWith("fixture.Main.main:"), at.toString());
+        assertTrue(set.getAsJsonArray("all").get(0).getAsJsonObject().getAsJsonObject("f").has("owner"),
+                "all fields, not just fields=");
+        JsonArray all = ev.stream().filter(e -> isEvent(e, "set", "fixture.Account")).reduce((x, y) -> y).orElseThrow()
+                .getAsJsonArray("all");
+        assertTrue(all.toString().contains("\"fixture.Savings\""), "every live tracked object: " + all);
 
         List<JsonObject> lines = TransformerTest.readJsonl(stats);
         assertFalse(lines.isEmpty(), "at least one interval report in 700 ms at interval=0.2");

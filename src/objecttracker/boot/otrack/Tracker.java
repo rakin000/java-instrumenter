@@ -3,10 +3,14 @@ package otrack;
 import java.lang.instrument.Instrumentation;
 import java.lang.ref.ReferenceQueue;
 import java.lang.ref.WeakReference;
+import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicLong;
@@ -41,6 +45,7 @@ public final class Tracker {
     static volatile boolean stacks;
     static volatile int stackDepth = 8;
     static volatile boolean initHooks; // classes were instrumented to report field values at constructor exit
+    static volatile boolean dumpOnSet; // set events also carry the field values of every live tracked object
     static volatile Instrumentation inst;
     static final LongAdder errors = new LongAdder();
 
@@ -235,14 +240,90 @@ public final class Tracker {
         return Events.on && enabled ? find(o) : null;
     }
 
-    private static void set(Ref r, String name, String json) {
+    private static void set(Object o, Ref r, String name, String json) {
         try {
-            Events.emit(head("set", r).append(",\"th\":").append(quote(Thread.currentThread().getName()))
-                    .append(",\"field\":").append(quote(name)).append(",\"v\":").append(json)
-                    .append(stack()).append('}').toString());
+            StringBuilder b = head("set", r).append(",\"th\":").append(quote(Thread.currentThread().getName()))
+                    .append(",\"field\":").append(quote(name)).append(",\"v\":").append(json).append(stack());
+            if (dumpOnSet) dumpAll(b, o, name, json);
+            Events.emit(b.append('}').toString());
         } catch (Throwable t) {
             errors.increment();
         }
+    }
+
+    // ---- dumpOnSet: field values of every live tracked object ----------------------------------
+
+    /** An instance field of a tracked class or one of its superclasses, and its key in the dump. */
+    private record Slot(Field field, String key) {}
+
+    /**
+     * Every readable instance field of a class, most-derived first. A field hidden by a subclass field of the
+     * same name is keyed {@code Declarer.name}. Fields that cannot be made accessible are left out.
+     */
+    private static final ClassValue<Slot[]> SLOTS = new ClassValue<>() {
+        @Override
+        protected Slot[] computeValue(Class<?> c) {
+            List<Slot> out = new ArrayList<>();
+            Set<String> keys = new HashSet<>();
+            try {
+                for (Class<?> k = c; k != null && k != Object.class; k = k.getSuperclass()) {
+                    boolean open = open(k);
+                    for (Field f : k.getDeclaredFields()) {
+                        if (Modifier.isStatic(f.getModifiers()) || f.isSynthetic()) continue;
+                        if (!open || !f.trySetAccessible()) continue;
+                        String key = keys.add(f.getName()) ? f.getName() : k.getSimpleName() + "." + f.getName();
+                        out.add(new Slot(f, key));
+                    }
+                }
+            } catch (Throwable t) {
+                errors.increment(); // e.g. denied by a security manager: keep what was collected, don't retry
+            }
+            return out.toArray(new Slot[0]);
+        }
+    };
+
+    /** Whether k's package is open to the tracker, opening it via Instrumentation if needed and possible. */
+    private static boolean open(Class<?> k) {
+        Module m = k.getModule(), me = Tracker.class.getModule();
+        String pkg = k.getPackageName();
+        if (m.isOpen(pkg, me)) return true;
+        Instrumentation i = inst;
+        if (i == null || !i.isModifiableModule(m)) return false;
+        i.redefineModule(m, Set.of(), Map.of(), Map.of(pkg, Set.of(me)), Set.of(), Map.of());
+        return m.isOpen(pkg, me);
+    }
+
+    /**
+     * Appends ,"all":[{"id":..,"class":..,"f":{..}},..] with every live tracked object. Runs before the
+     * PUTFIELD, so the field being written on {@code written} shows the new value passed to the hook.
+     */
+    private static void dumpAll(StringBuilder b, Object written, String name, String json) throws IllegalAccessException {
+        b.append(",\"all\":[");
+        boolean first = true;
+        for (Ref r : LIVE.keySet()) {
+            Object o = r.get();
+            if (o == null) continue; // collected, not yet released
+            if (!first) b.append(',');
+            first = false;
+            b.append("{\"id\":").append(r.id).append(",\"class\":").append(quote(r.stats.name)).append(",\"f\":{");
+            Slot[] slots = SLOTS.get(o.getClass());
+            for (int i = 0; i < slots.length; i++) {
+                Slot s = slots[i];
+                if (i > 0) b.append(',');
+                b.append(quote(s.key)).append(':')
+                        .append(o == written && s.key.equals(name) ? json : fieldVal(s.field, o));
+            }
+            b.append("}}");
+        }
+        b.append(']');
+    }
+
+    private static String fieldVal(Field f, Object o) throws IllegalAccessException {
+        Class<?> t = f.getType();
+        if (t == float.class) return num(f.getFloat(o));
+        if (t == double.class) return num(f.getDouble(o));
+        if (t == char.class) return quote(String.valueOf(f.getChar(o)));
+        return val(f.get(o)); // other primitives come back boxed, which val() prints as plain JSON
     }
 
     public static void onInit(Object o, boolean v, String n) { if (initing(o)) init(n, String.valueOf(v)); }
@@ -253,13 +334,13 @@ public final class Tracker {
     public static void onInit(Object o, double v, String n) { if (initing(o)) init(n, num(v)); }
     public static void onInit(Object o, Object v, String n) { if (initing(o)) init(n, val(v)); }
 
-    public static void onSet(Object o, boolean v, String n) { Ref r = setRef(o); if (r != null) set(r, n, String.valueOf(v)); }
-    public static void onSet(Object o, char v, String n) { Ref r = setRef(o); if (r != null) set(r, n, quote(String.valueOf(v))); }
-    public static void onSet(Object o, int v, String n) { Ref r = setRef(o); if (r != null) set(r, n, String.valueOf(v)); }
-    public static void onSet(Object o, long v, String n) { Ref r = setRef(o); if (r != null) set(r, n, String.valueOf(v)); }
-    public static void onSet(Object o, float v, String n) { Ref r = setRef(o); if (r != null) set(r, n, num(v)); }
-    public static void onSet(Object o, double v, String n) { Ref r = setRef(o); if (r != null) set(r, n, num(v)); }
-    public static void onSet(Object o, Object v, String n) { Ref r = setRef(o); if (r != null) set(r, n, val(v)); }
+    public static void onSet(Object o, boolean v, String n) { Ref r = setRef(o); if (r != null) set(o, r, n, String.valueOf(v)); }
+    public static void onSet(Object o, char v, String n) { Ref r = setRef(o); if (r != null) set(o, r, n, quote(String.valueOf(v))); }
+    public static void onSet(Object o, int v, String n) { Ref r = setRef(o); if (r != null) set(o, r, n, String.valueOf(v)); }
+    public static void onSet(Object o, long v, String n) { Ref r = setRef(o); if (r != null) set(o, r, n, String.valueOf(v)); }
+    public static void onSet(Object o, float v, String n) { Ref r = setRef(o); if (r != null) set(o, r, n, num(v)); }
+    public static void onSet(Object o, double v, String n) { Ref r = setRef(o); if (r != null) set(o, r, n, num(v)); }
+    public static void onSet(Object o, Object v, String n) { Ref r = setRef(o); if (r != null) set(o, r, n, val(v)); }
 
     private static StringBuilder head(String ev, Ref r) {
         return new StringBuilder(160).append("{\"t\":").append((System.nanoTime() - T0) / 1000L)

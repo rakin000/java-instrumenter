@@ -25,7 +25,10 @@ import java.util.Set;
  *                               always carry the writer's call stack ("at")
  *                               (only honoured on the first start; classes must be loaded after or
  *                               retransformed by it)
- *   events=path                 JSONL event trace (default $TMP/object-tracker-PID-events.jsonl)
+ *   dumpOnSet=true|false        each set event also carries "all": the current instance-field values (own and
+ *                               inherited, read reflectively) of every live tracked object of every marked
+ *                               class (default false; costs O(live objects) per write -- combine with sample=)
+ *   events=path                JSONL event trace (default $TMP/object-tracker-PID-events.jsonl)
  *   logFile=path                append the agent's own [otrack] messages to this file instead of stderr
  * </pre>
  */
@@ -67,6 +70,7 @@ public final class Controller {
         if (o.has("sample")) Tracker.sample = o.intAtLeast("sample", 1);
         if (o.has("stacks")) Tracker.stacks = Boolean.parseBoolean(o.get("stacks"));
         if (o.has("depth")) Tracker.stackDepth = o.intAtLeast("depth", 1);
+        if (o.has("dumpOnSet")) Tracker.dumpOnSet = Boolean.parseBoolean(o.get("dumpOnSet"));
 
         if (transformer == null) firstStart(o, i);
         else if (o.has("fields") || o.has("events")) Log.log("fields/events ignored: only applied on the first start");
