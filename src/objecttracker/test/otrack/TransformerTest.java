@@ -140,8 +140,14 @@ class TransformerTest {
         }
         assertEquals(15, alice.get("balance").getAsLong(), "the field being written shows its new value");
         assertEquals("alice", alice.get("owner").getAsString());
-        assertEquals(Set.of("term", "balance", "owner"), carol.keySet(), "inherited fields are included");
+        assertEquals(Set.of("term", "tags", "balance", "owner", "limits"), carol.keySet(), "inherited fields are included");
         assertEquals(10, carol.get("balance").getAsLong());
+
+        JsonObject limits = alice.getAsJsonObject("limits"); // collections are opened one level
+        assertEquals("java.util.Collections$UnmodifiableMap", limits.get("class").getAsString());
+        assertEquals(2, limits.get("size").getAsInt());
+        assertEquals("[[\"daily\",100],[\"weekly\",500]]", limits.get("entries").toString());
+        assertEquals("[\"gold\"]", carol.getAsJsonObject("tags").get("items").toString());
         assertNotNull(s);
     }
 

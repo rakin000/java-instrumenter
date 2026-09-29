@@ -6,6 +6,7 @@ import java.lang.ref.WeakReference;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -39,6 +40,7 @@ public final class Tracker {
     static final ConcurrentHashMap<Ref, Ref> LIVE = new ConcurrentHashMap<>();
     private static final AtomicLong IDS = new AtomicLong();
     private static final int MAX_STR = 256;
+    private static final int MAX_ELEMS = 100; // elements shown per collection/map in the dumpOnSet dump
 
     static volatile boolean enabled;
     static volatile int sample = 1;
@@ -240,11 +242,12 @@ public final class Tracker {
         return Events.on && enabled ? find(o) : null;
     }
 
-    private static void set(Object o, Ref r, String name, String json) {
+    /** {@code v} is the new value of an object-typed field (so the dump can open collections), else null. */
+    private static void set(Object o, Ref r, String name, String json, Object v) {
         try {
             StringBuilder b = head("set", r).append(",\"th\":").append(quote(Thread.currentThread().getName()))
                     .append(",\"field\":").append(quote(name)).append(",\"v\":").append(json).append(stack());
-            if (dumpOnSet) dumpAll(b, o, name, json);
+            if (dumpOnSet) dumpAll(b, o, name, v != null ? expand(v) : json);
             Events.emit(b.append('}').toString());
         } catch (Throwable t) {
             errors.increment();
@@ -323,7 +326,41 @@ public final class Tracker {
         if (t == float.class) return num(f.getFloat(o));
         if (t == double.class) return num(f.getDouble(o));
         if (t == char.class) return quote(String.valueOf(f.getChar(o)));
-        return val(f.get(o)); // other primitives come back boxed, which val() prints as plain JSON
+        return expand(f.get(o)); // other primitives come back boxed, which val() prints as plain JSON
+    }
+
+    /**
+     * Like {@link #val}, but a JDK Collection or Map is opened one level: {@code "size"} plus up to
+     * {@link #MAX_ELEMS} elements ({@code "items"}) or key/value pairs ({@code "entries":[[k,v],..]}), each
+     * printed by val(). Only bootstrap-loaded classes are opened, so no application collection code runs;
+     * if iterating fails (e.g. a concurrent modification) the plain val() form is used.
+     */
+    private static String expand(Object v) {
+        if (v == null || v.getClass().getClassLoader() != null || !(v instanceof Collection<?> || v instanceof Map<?, ?>))
+            return val(v);
+        try {
+            StringBuilder b = objHead(v);
+            int n = 0;
+            if (v instanceof Map<?, ?> m) {
+                b.append(",\"size\":").append(m.size()).append(",\"entries\":[");
+                for (Map.Entry<?, ?> e : m.entrySet()) {
+                    if (n++ == MAX_ELEMS) break;
+                    if (n > 1) b.append(',');
+                    b.append('[').append(val(e.getKey())).append(',').append(val(e.getValue())).append(']');
+                }
+            } else {
+                Collection<?> c = (Collection<?>) v;
+                b.append(",\"size\":").append(c.size()).append(",\"items\":[");
+                for (Object x : c) {
+                    if (n++ == MAX_ELEMS) break;
+                    if (n > 1) b.append(',');
+                    b.append(val(x));
+                }
+            }
+            return b.append("]}").toString();
+        } catch (Throwable t) {
+            return val(v);
+        }
     }
 
     public static void onInit(Object o, boolean v, String n) { if (initing(o)) init(n, String.valueOf(v)); }
@@ -334,13 +371,13 @@ public final class Tracker {
     public static void onInit(Object o, double v, String n) { if (initing(o)) init(n, num(v)); }
     public static void onInit(Object o, Object v, String n) { if (initing(o)) init(n, val(v)); }
 
-    public static void onSet(Object o, boolean v, String n) { Ref r = setRef(o); if (r != null) set(o, r, n, String.valueOf(v)); }
-    public static void onSet(Object o, char v, String n) { Ref r = setRef(o); if (r != null) set(o, r, n, quote(String.valueOf(v))); }
-    public static void onSet(Object o, int v, String n) { Ref r = setRef(o); if (r != null) set(o, r, n, String.valueOf(v)); }
-    public static void onSet(Object o, long v, String n) { Ref r = setRef(o); if (r != null) set(o, r, n, String.valueOf(v)); }
-    public static void onSet(Object o, float v, String n) { Ref r = setRef(o); if (r != null) set(o, r, n, num(v)); }
-    public static void onSet(Object o, double v, String n) { Ref r = setRef(o); if (r != null) set(o, r, n, num(v)); }
-    public static void onSet(Object o, Object v, String n) { Ref r = setRef(o); if (r != null) set(o, r, n, val(v)); }
+    public static void onSet(Object o, boolean v, String n) { Ref r = setRef(o); if (r != null) set(o, r, n, String.valueOf(v), null); }
+    public static void onSet(Object o, char v, String n) { Ref r = setRef(o); if (r != null) set(o, r, n, quote(String.valueOf(v)), null); }
+    public static void onSet(Object o, int v, String n) { Ref r = setRef(o); if (r != null) set(o, r, n, String.valueOf(v), null); }
+    public static void onSet(Object o, long v, String n) { Ref r = setRef(o); if (r != null) set(o, r, n, String.valueOf(v), null); }
+    public static void onSet(Object o, float v, String n) { Ref r = setRef(o); if (r != null) set(o, r, n, num(v), null); }
+    public static void onSet(Object o, double v, String n) { Ref r = setRef(o); if (r != null) set(o, r, n, num(v), null); }
+    public static void onSet(Object o, Object v, String n) { Ref r = setRef(o); if (r != null) set(o, r, n, val(v), v); }
 
     private static StringBuilder head(String ev, Ref r) {
         return new StringBuilder(160).append("{\"t\":").append((System.nanoTime() - T0) / 1000L)
@@ -371,8 +408,14 @@ public final class Tracker {
         if (v instanceof Character c) return quote(c.toString());
         if (v instanceof Enum<?> e) return quote(e.name());
         if (v instanceof Class<?> c) return quote(c.getName());
+        return objHead(v).append('}').toString();
+    }
+
+    /** {"class":..[,"id":..] without the closing brace; the id only if v is itself tracked. */
+    private static StringBuilder objHead(Object v) {
         Ref t = find(v);
-        return "{\"class\":" + quote(v.getClass().getName()) + (t != null ? ",\"id\":" + t.id : "") + "}";
+        StringBuilder b = new StringBuilder("{\"class\":").append(quote(v.getClass().getName()));
+        return t != null ? b.append(",\"id\":").append(t.id) : b;
     }
 
     /** ,"at":[...] with the caller's frames when stacks=true, else "". */

@@ -27,7 +27,8 @@ import java.util.Set;
  *                               retransformed by it)
  *   dumpOnSet=true|false        each set event also carries "all": the current instance-field values (own and
  *                               inherited, read reflectively) of every live tracked object of every marked
- *                               class (default false; costs O(live objects) per write -- combine with sample=)
+ *                               class; JDK collections/maps are opened one level (size + first 100 elements)
+ *                               (default false; costs O(live objects) per write -- combine with sample=)
  *   events=path                JSONL event trace (default $TMP/object-tracker-PID-events.jsonl)
  *   logFile=path                append the agent's own [otrack] messages to this file instead of stderr
  * </pre>
